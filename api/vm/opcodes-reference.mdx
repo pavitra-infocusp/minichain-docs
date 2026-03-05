@@ -1,0 +1,688 @@
+---
+title: Opcodes Reference
+description: Complete reference of all VM opcodes and their encodings
+---
+
+Minichain VM uses a register-based instruction set with 16 general-purpose registers (R0-R15).
+
+## Opcode Enum
+
+All opcodes are represented as a Rust enum with explicit byte values.
+
+```rust
+#[repr(u8)]
+pub enum Opcode {
+    // Control Flow (0x00-0x0F)
+    HALT = 0x00,
+    NOP = 0x01,
+    JUMP = 0x02,
+    JUMPI = 0x03,
+    CALL = 0x04,
+    RET = 0x05,
+    REVERT = 0x0F,
+    // ... (see full listing below)
+}
+```
+
+## Control Flow (0x00-0x0F)
+
+### HALT (0x00)
+
+**Encoding**: `[0x00]` (1 byte)  
+**Gas**: 0
+
+Halts execution successfully.
+
+```asm
+HALT
+```
+
+### NOP (0x01)
+
+**Encoding**: `[0x01]` (1 byte)  
+**Gas**: 0
+
+No operation. Does nothing.
+
+```asm
+NOP
+```
+
+### JUMP (0x02)
+
+**Encoding**: `[0x02, RRRR____]` (2 bytes)  
+**Gas**: 8
+
+Unconditional jump to address in register.
+
+<ParamField path="target" type="register" required>
+  Register containing jump destination
+</ParamField>
+
+```asm
+JUMP R5     ; Jump to address in R5
+```
+
+**Bytecode**: `[0x02, 0x50]`
+
+### JUMPI (0x03)
+
+**Encoding**: `[0x03, CCCC_TTTT]` (2 bytes)  
+**Gas**: 8
+
+Conditional jump if condition register is non-zero.
+
+<ParamField path="cond" type="register" required>
+  Condition register (jump if non-zero)
+</ParamField>
+
+<ParamField path="target" type="register" required>
+  Target address register
+</ParamField>
+
+```asm
+JUMPI R3, R5    ; Jump to R5 if R3 != 0
+```
+
+**Bytecode**: `[0x03, 0x35]`
+
+### CALL (0x04)
+
+**Encoding**: `[0x04]` (1 byte)  
+**Gas**: 700
+
+Call external contract (placeholder - not fully implemented).
+
+### RET (0x05)
+
+**Encoding**: `[0x05]` (1 byte)  
+**Gas**: 0
+
+Return from execution successfully.
+
+```asm
+RET
+```
+
+### REVERT (0x0F)
+
+**Encoding**: `[0x0F]` (1 byte)  
+**Gas**: 0
+
+Revert execution and return error.
+
+```asm
+REVERT
+```
+
+## Arithmetic (0x10-0x1F)
+
+### ADD (0x10)
+
+**Encoding**: `[0x10, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Add two registers with wrapping.
+
+<ParamField path="dst" type="register" required>
+  Destination register
+</ParamField>
+
+<ParamField path="src1" type="register" required>
+  First source register
+</ParamField>
+
+<ParamField path="src2" type="register" required>
+  Second source register
+</ParamField>
+
+```asm
+ADD R0, R1, R2    ; R0 = R1 + R2
+```
+
+**Bytecode**: `[0x10, 0x01, 0x20]`
+
+### SUB (0x11)
+
+**Encoding**: `[0x11, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Subtract two registers with wrapping.
+
+```asm
+SUB R3, R4, R5    ; R3 = R4 - R5
+```
+
+**Bytecode**: `[0x11, 0x34, 0x50]`
+
+### MUL (0x12)
+
+**Encoding**: `[0x12, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 3
+
+Multiply two registers with wrapping.
+
+```asm
+MUL R0, R1, R2    ; R0 = R1 * R2
+```
+
+**Bytecode**: `[0x12, 0x01, 0x20]`
+
+### DIV (0x13)
+
+**Encoding**: `[0x13, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 5
+
+Divide two registers. Returns error if divisor is zero.
+
+```asm
+DIV R0, R1, R2    ; R0 = R1 / R2
+```
+
+**Bytecode**: `[0x13, 0x01, 0x20]`
+
+**Error**: `VmError::DivisionByZero` if R2 == 0
+
+### MOD (0x14)
+
+**Encoding**: `[0x14, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 5
+
+Modulo operation. Returns error if divisor is zero.
+
+```asm
+MOD R0, R1, R2    ; R0 = R1 % R2
+```
+
+**Bytecode**: `[0x14, 0x01, 0x20]`
+
+**Error**: `VmError::DivisionByZero` if R2 == 0
+
+### ADDI (0x15)
+
+**Encoding**: `[0x15, DDDD_SSSS, imm32]` (6 bytes)  
+**Gas**: 2
+
+Add immediate 32-bit value to register.
+
+<ParamField path="dst" type="register" required>
+  Destination register
+</ParamField>
+
+<ParamField path="src" type="register" required>
+  Source register
+</ParamField>
+
+<ParamField path="immediate" type="u32" required>
+  32-bit immediate value (little-endian)
+</ParamField>
+
+```asm
+ADDI R0, R1, 1000    ; R0 = R1 + 1000
+```
+
+**Bytecode**: `[0x15, 0x01, 0xE8, 0x03, 0x00, 0x00]`
+
+## Bitwise (0x20-0x2F)
+
+### AND (0x20)
+
+**Encoding**: `[0x20, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Bitwise AND of two registers.
+
+```asm
+AND R0, R1, R2    ; R0 = R1 & R2
+```
+
+### OR (0x21)
+
+**Encoding**: `[0x21, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Bitwise OR of two registers.
+
+```asm
+OR R0, R1, R2     ; R0 = R1 | R2
+```
+
+### XOR (0x22)
+
+**Encoding**: `[0x22, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Bitwise XOR of two registers.
+
+```asm
+XOR R0, R1, R2    ; R0 = R1 ^ R2
+```
+
+### NOT (0x23)
+
+**Encoding**: `[0x23, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Bitwise NOT (in-place).
+
+```asm
+NOT R0            ; R0 = !R0
+```
+
+### SHL (0x24)
+
+**Encoding**: `[0x24, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 5
+
+Shift left. Shift amount is masked to 6 bits (0-63).
+
+```asm
+SHL R0, R1, R2    ; R0 = R1 << (R2 & 0x3F)
+```
+
+### SHR (0x25)
+
+**Encoding**: `[0x25, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 5
+
+Logical shift right. Shift amount is masked to 6 bits (0-63).
+
+```asm
+SHR R0, R1, R2    ; R0 = R1 >> (R2 & 0x3F)
+```
+
+## Comparison (0x30-0x3F)
+
+### EQ (0x30)
+
+**Encoding**: `[0x30, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Test equality. Result is 1 if equal, 0 otherwise.
+
+```asm
+EQ R0, R1, R2     ; R0 = (R1 == R2) ? 1 : 0
+```
+
+### NE (0x31)
+
+**Encoding**: `[0x31, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Test inequality.
+
+```asm
+NE R0, R1, R2     ; R0 = (R1 != R2) ? 1 : 0
+```
+
+### LT (0x32)
+
+**Encoding**: `[0x32, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Test less than.
+
+```asm
+LT R0, R1, R2     ; R0 = (R1 < R2) ? 1 : 0
+```
+
+### GT (0x33)
+
+**Encoding**: `[0x33, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Test greater than.
+
+```asm
+GT R0, R1, R2     ; R0 = (R1 > R2) ? 1 : 0
+```
+
+### LE (0x34)
+
+**Encoding**: `[0x34, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Test less than or equal.
+
+```asm
+LE R0, R1, R2     ; R0 = (R1 <= R2) ? 1 : 0
+```
+
+### GE (0x35)
+
+**Encoding**: `[0x35, DDDD_SSS1, SSS2____]` (3 bytes)  
+**Gas**: 2
+
+Test greater than or equal.
+
+```asm
+GE R0, R1, R2     ; R0 = (R1 >= R2) ? 1 : 0
+```
+
+### ISZERO (0x36)
+
+**Encoding**: `[0x36, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Test if register is zero (in-place).
+
+```asm
+ISZERO R0         ; R0 = (R0 == 0) ? 1 : 0
+```
+
+## Memory - RAM (0x40-0x4F)
+
+### LOAD8 (0x40)
+
+**Encoding**: `[0x40, DDDD_AAAA]` (2 bytes)  
+**Gas**: 3
+
+Load 8-bit value from memory.
+
+<ParamField path="dst" type="register" required>
+  Destination register
+</ParamField>
+
+<ParamField path="addr" type="register" required>
+  Register containing memory address
+</ParamField>
+
+```asm
+LOAD8 R0, R5      ; R0 = mem[R5] (8-bit)
+```
+
+### LOAD64 (0x41)
+
+**Encoding**: `[0x41, DDDD_AAAA]` (2 bytes)  
+**Gas**: 3
+
+Load 64-bit value from memory (little-endian).
+
+```asm
+LOAD64 R0, R5     ; R0 = mem[R5..R5+7] (64-bit)
+```
+
+### STORE8 (0x42)
+
+**Encoding**: `[0x42, AAAA_VVVV]` (2 bytes)  
+**Gas**: 3
+
+Store 8-bit value to memory.
+
+<ParamField path="addr" type="register" required>
+  Register containing memory address
+</ParamField>
+
+<ParamField path="value" type="register" required>
+  Register containing value to store
+</ParamField>
+
+```asm
+STORE8 R5, R0     ; mem[R5] = R0 (8-bit)
+```
+
+### STORE64 (0x43)
+
+**Encoding**: `[0x43, AAAA_VVVV]` (2 bytes)  
+**Gas**: 3
+
+Store 64-bit value to memory (little-endian).
+
+```asm
+STORE64 R5, R0    ; mem[R5..R5+7] = R0 (64-bit)
+```
+
+### MSIZE (0x44)
+
+**Encoding**: `[0x44, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get current memory size in bytes.
+
+```asm
+MSIZE R0          ; R0 = memory size
+```
+
+### MCOPY (0x45)
+
+**Encoding**: `[0x45, DDDD_SSSS, LLLL____]` (3 bytes)  
+**Gas**: 3
+
+Copy memory region.
+
+<ParamField path="dest" type="register" required>
+  Destination address register
+</ParamField>
+
+<ParamField path="src" type="register" required>
+  Source address register
+</ParamField>
+
+<ParamField path="len" type="register" required>
+  Length register (number of bytes)
+</ParamField>
+
+```asm
+MCOPY R5, R6, R7  ; Copy R7 bytes from mem[R6] to mem[R5]
+```
+
+## Storage - Disk (0x50-0x5F)
+
+### SLOAD (0x50)
+
+**Encoding**: `[0x50, DDDD_KKKK]` (2 bytes)  
+**Gas**: 100
+
+Load from persistent storage. Key is 64-bit value from register, expanded to 32 bytes.
+
+<ParamField path="dst" type="register" required>
+  Destination register
+</ParamField>
+
+<ParamField path="key" type="register" required>
+  Storage key register
+</ParamField>
+
+```asm
+SLOAD R0, R1      ; R0 = storage[R1]
+```
+
+### SSTORE (0x51)
+
+**Encoding**: `[0x51, KKKK_VVVV]` (2 bytes)  
+**Gas**: 20,000 (set) or 5,000 (reset)
+
+Store to persistent storage.
+
+<ParamField path="key" type="register" required>
+  Storage key register
+</ParamField>
+
+<ParamField path="value" type="register" required>
+  Value register
+</ParamField>
+
+```asm
+SSTORE R1, R0     ; storage[R1] = R0
+```
+
+**Gas Cost**: 20,000 if writing to empty slot, 5,000 if overwriting existing value.
+
+## Immediate (0x70-0x7F)
+
+### LOADI (0x70)
+
+**Encoding**: `[0x70, RRRR____, imm64]` (10 bytes)  
+**Gas**: 2
+
+Load 64-bit immediate value into register.
+
+<ParamField path="dst" type="register" required>
+  Destination register
+</ParamField>
+
+<ParamField path="immediate" type="u64" required>
+  64-bit immediate value (little-endian)
+</ParamField>
+
+```asm
+LOADI R0, 0x123456789ABCDEF0
+```
+
+**Bytecode**: `[0x70, 0x00, 0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12]`
+
+### MOV (0x71)
+
+**Encoding**: `[0x71, DDDD_SSSS]` (2 bytes)  
+**Gas**: 2
+
+Move value from one register to another.
+
+```asm
+MOV R0, R1        ; R0 = R1
+```
+
+## Context (0x80-0x8F)
+
+### CALLER (0x80)
+
+**Encoding**: `[0x80, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get caller address (first 8 bytes as u64).
+
+```asm
+CALLER R0         ; R0 = caller address
+```
+
+### CALLVALUE (0x81)
+
+**Encoding**: `[0x81, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get call value.
+
+```asm
+CALLVALUE R0      ; R0 = call value
+```
+
+### ADDRESS (0x82)
+
+**Encoding**: `[0x82, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get current contract address (first 8 bytes as u64).
+
+```asm
+ADDRESS R0        ; R0 = contract address
+```
+
+### BLOCKNUMBER (0x83)
+
+**Encoding**: `[0x83, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get current block number.
+
+```asm
+BLOCKNUMBER R0    ; R0 = block number
+```
+
+### TIMESTAMP (0x84)
+
+**Encoding**: `[0x84, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get current block timestamp.
+
+```asm
+TIMESTAMP R0      ; R0 = timestamp
+```
+
+### GAS (0x85)
+
+**Encoding**: `[0x85, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Get remaining gas.
+
+```asm
+GAS R0            ; R0 = gas remaining
+```
+
+## Debug (0xF0-0xFF)
+
+### LOG (0xF0)
+
+**Encoding**: `[0xF0, RRRR____]` (2 bytes)  
+**Gas**: 2
+
+Log register value for debugging.
+
+```asm
+LOG R0            ; Append R0 to execution logs
+```
+
+## Methods
+
+### from_byte
+
+Parse a byte as an opcode.
+
+```rust
+pub fn from_byte(byte: u8) -> Option<Self>
+```
+
+<ParamField path="byte" type="u8" required>
+  Byte to parse
+</ParamField>
+
+<ResponseField name="opcode" type="Option<Opcode>">
+  Some(opcode) if valid, None otherwise
+</ResponseField>
+
+### instruction_size
+
+Get the number of bytes this instruction consumes.
+
+```rust
+pub fn instruction_size(&self) -> usize
+```
+
+<ResponseField name="size" type="usize">
+  Total instruction size in bytes (including opcode)
+</ResponseField>
+
+## Register Encoding Format
+
+Registers are encoded in 4-bit fields (0-15):
+
+- **Single register**: `RRRR____` (high nibble)
+- **Two registers**: `RRRR_SSSS` (packed byte)
+- **Three registers**: `DDDD_SSS1, SSS2____` (1.5 bytes)
+
+## Example Program
+
+```rust
+// Compute (5 + 3) * 2 and store to memory
+let bytecode = vec![
+    // LOADI R1, 5
+    0x70, 0x10, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // LOADI R2, 3
+    0x70, 0x20, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // ADD R0, R1, R2     ; R0 = 5 + 3 = 8
+    0x10, 0x01, 0x20,
+    // LOADI R3, 2
+    0x70, 0x30, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // MUL R0, R0, R3     ; R0 = 8 * 2 = 16
+    0x12, 0x00, 0x30,
+    // LOADI R5, 100      ; Memory address
+    0x70, 0x50, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // STORE64 R5, R0     ; mem[100] = 16
+    0x43, 0x50,
+    // LOG R0
+    0xF0, 0x00,
+    // HALT
+    0x00,
+];
+```

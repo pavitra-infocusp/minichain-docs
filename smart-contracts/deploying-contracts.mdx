@@ -1,0 +1,356 @@
+---
+title: Deploying Contracts
+description: Learn how to compile and deploy smart contracts to the Minichain blockchain
+---
+
+Deploying a contract involves compiling assembly code to bytecode and submitting it to the blockchain as a deployment transaction. This guide walks through the complete process.
+
+## Prerequisites
+
+Before deploying contracts, ensure you have:
+
+<Steps>
+  <Step title="Initialize blockchain">
+    Run `minichain init` to create the blockchain data directory
+  </Step>
+  
+  <Step title="Create an account">
+    Run `minichain account new` to create a keypair for deployment
+  </Step>
+  
+  <Step title="Fund the account">
+    Ensure the account has sufficient balance for gas fees
+  </Step>
+</Steps>
+
+## Compilation Process
+
+Contracts are written in assembly and compiled to bytecode:
+
+### Writing Assembly
+
+Create a contract file (e.g., `counter.asm`):
+
+```asm counter.asm
+; Simple counter contract
+.entry main
+
+.const STORAGE_COUNTER 0
+
+main:
+    LOADI R0, STORAGE_COUNTER
+    SLOAD R1, R0            ; Load current counter
+    LOADI R2, 1
+    ADD R1, R1, R2          ; Increment
+    SSTORE R0, R1           ; Store back
+    LOG R1                  ; Emit new value
+    HALT
+```
+
+### Compiling to Bytecode
+
+The assembler compiles assembly to bytecode:
+
+```rust
+use minichain_assembler::assemble;
+use std::fs;
+
+// Read source file
+let source = fs::read_to_string("counter.asm")?;
+
+// Compile to bytecode
+let bytecode = assemble(&source)?;
+
+println!("Compiled {} bytes of bytecode", bytecode.len());
+```
+
+The compiler performs:
+1. **Lexical analysis** - Tokenizes the source
+2. **Parsing** - Builds an AST
+3. **Two-pass compilation**:
+   - Pass 1: Collect label addresses
+   - Pass 2: Emit bytecode with resolved references
+
+<Info>
+  The `minichain deploy` command handles compilation automatically - you just provide the `.asm` source file.
+</Info>
+
+## Deployment Transaction
+
+### Using the CLI
+
+Deploy a contract using the CLI:
+
+```bash
+minichain deploy \
+  --from alice \
+  --source counter.asm \
+  --gas-limit 100000 \
+  --gas-price 1
+```
+
+<ParamField path="--from" type="string" required>
+  Account name (keypair file without `.json` extension)
+</ParamField>
+
+<ParamField path="--source" type="string" required>
+  Path to assembly source file (`.asm`)
+</ParamField>
+
+<ParamField path="--gas-limit" type="number" required>
+  Maximum gas to spend on deployment
+</ParamField>
+
+<ParamField path="--gas-price" type="number" default="1">
+  Price per unit of gas
+</ParamField>
+
+<ParamField path="--data-dir" type="string" default="./data">
+  Blockchain data directory
+</ParamField>
+
+### Deployment Output
+
+Successful deployment shows:
+
+```bash
+Deploying contract...
+
+  Compiling: counter.asm
+✓ Compiled to 23 bytes
+
+  Deployer:  0x1234567890abcdef1234567890abcdef12345678
+  Nonce:     0
+  Balance:   1000000
+
+✓ Transaction created
+    Hash: 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+
+✓ Contract deployment submitted
+
+  Contract Address: 0x9876543210fedcba9876543210fedcba98765432
+
+Transaction will be included in the next block.
+Use minichain block produce to produce a block.
+```
+
+<Note>
+  The contract address is deterministically derived from the deployer's address and nonce.
+</Note>
+
+## Understanding Deployment
+
+### Contract Address Calculation
+
+Contract addresses are deterministic:
+
+```rust
+// Contract address = hash(deployer_address || nonce)
+let contract_address = tx.contract_address().unwrap();
+```
+
+This ensures:
+- **Predictability** - You know the address before deployment
+- **No collisions** - Each deployment creates a unique address
+- **Reproducibility** - Same deployer + nonce = same address
+
+### Gas Estimation
+
+Deployment gas cost formula:
+
+```
+gas_required = 21,000 + (bytecode_length × 200)
+```
+
+- **21,000** - Base transaction cost
+- **200 per byte** - Bytecode storage cost
+
+<Warning>
+  Always set `--gas-limit` higher than the estimated gas to account for execution costs. If gas runs out, the transaction reverts.
+</Warning>
+
+### Transaction Lifecycle
+
+<Steps>
+  <Step title="Submit transaction">
+    The `minichain deploy` command creates and signs a deployment transaction, then submits it to the mempool.
+  </Step>
+  
+  <Step title="Wait for block">
+    The transaction stays in the mempool until an authority produces a block.
+  </Step>
+  
+  <Step title="Execute deployment">
+    When the block is produced, the deployment transaction executes:
+    - Bytecode is stored at the contract address
+    - Account balance is created
+    - Gas is consumed
+  </Step>
+  
+  <Step title="Contract is ready">
+    The contract is now deployed and can be called.
+  </Step>
+</Steps>
+
+## Producing a Block
+
+After deployment, produce a block to include the transaction:
+
+```bash
+minichain block produce --authority authority_0
+```
+
+This:
+1. Gathers transactions from the mempool
+2. Executes each transaction
+3. Creates a new block
+4. Updates the blockchain state
+
+<Check>
+  After block production, your contract is live and callable!
+</Check>
+
+## Advanced Deployment
+
+### Programmatic Deployment
+
+Deploy contracts programmatically:
+
+```rust
+use minichain_assembler::assemble;
+use minichain_core::{Transaction, Keypair};
+use minichain_chain::Blockchain;
+use minichain_storage::Storage;
+
+// Compile contract
+let source = std::fs::read_to_string("counter.asm")?;
+let bytecode = assemble(&source)?;
+
+// Load deployer keypair
+let keypair = Keypair::new();
+let from = keypair.address();
+
+// Get nonce from state
+let storage = Storage::open("./data")?;
+let state = minichain_storage::StateManager::new(&storage);
+let nonce = state.get_nonce(&from)?;
+
+// Create deployment transaction
+let gas_limit = 21_000 + (bytecode.len() as u64 * 200);
+let gas_price = 1;
+let tx = Transaction::deploy(from, bytecode, nonce, gas_limit, gas_price)
+    .signed(&keypair);
+
+// Calculate contract address
+let contract_address = tx.contract_address().unwrap();
+println!("Contract will be deployed at: {}", contract_address.to_hex());
+
+// Submit to blockchain
+let mut blockchain = Blockchain::new(&storage, config);
+blockchain.submit_transaction(tx)?;
+```
+
+### Deployment with Constructor
+
+While Minichain doesn't have separate constructors, you can implement initialization logic:
+
+```asm
+.entry main
+
+.const STORAGE_INITIALIZED 0
+.const STORAGE_OWNER 1
+
+main:
+    ; Check if already initialized
+    LOADI R0, STORAGE_INITIALIZED
+    SLOAD R1, R0
+    LOADI R2, 1
+    EQ R3, R1, R2           ; Already initialized?
+    LOADI R4, normal_execution
+    JUMPI R3, R4
+
+    ; First execution - initialize
+    CALLER R5
+    LOADI R6, STORAGE_OWNER
+    SSTORE R6, R5           ; Store owner
+    SSTORE R0, R2           ; Mark initialized
+    HALT
+
+normal_execution:
+    ; Normal contract logic
+    HALT
+```
+
+### Deployment Verification
+
+Verify deployment succeeded:
+
+```bash
+# Check account exists and is a contract
+minichain account info <contract-address>
+
+# Should show:
+# - is_contract: true
+# - code_size: <bytecode length>
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Compilation Errors">
+    **Undefined label:**
+    ```
+    compile error: undefined label: loop_end
+    ```
+    Ensure all labels used in `LOADI` or `JUMP` instructions are defined.
+    
+    **Invalid register:**
+    ```
+    invalid register at line 5: R16
+    ```
+    Use registers R0-R15 only.
+  </Accordion>
+
+  <Accordion title="Insufficient Balance">
+    ```
+    Insufficient balance: have 1000, need 100000 (estimated)
+    ```
+    
+    Fund your account before deploying:
+    ```bash
+    minichain tx send --from faucet --to <your-address> --amount 1000000
+    ```
+  </Accordion>
+
+  <Accordion title="Gas Limit Too Low">
+    ```
+    Gas limit too low: required 50000, got 10000
+    ```
+    
+    Increase the gas limit:
+    ```bash
+    minichain deploy --gas-limit 100000 ...
+    ```
+  </Accordion>
+
+  <Accordion title="Contract Already Exists">
+    Contract addresses are deterministic. If you see "contract already exists", either:
+    - You already deployed from this account at this nonce
+    - Deploy from a different account
+    - Execute a transaction to increment your nonce
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Call Contracts" icon="phone" href="/smart-contracts/calling-contracts">
+    Learn how to interact with deployed contracts
+  </Card>
+  <Card title="Examples" icon="code" href="/smart-contracts/examples">
+    See complete deployment examples
+  </Card>
+  <Card title="Gas & Fees" icon="gas-pump" href="/core-concepts/gas-system">
+    Understand gas costs and optimization
+  </Card>
+</CardGroup>

@@ -1,0 +1,354 @@
+---
+title: Account Management
+description: Create accounts, check balances, and mint tokens with the account command
+---
+
+The `account` command provides complete account management functionality, from generating keypairs to checking balances and minting tokens.
+
+## Subcommands
+
+- `new` - Generate a new keypair
+- `list` - List all saved keypairs
+- `balance` - Check account balance
+- `info` - Show detailed account information
+- `mint` - Mint tokens to an account (authority only)
+
+## Generate Keypair
+
+Create a new Ed25519 keypair for signing transactions.
+
+```bash
+minichain account new [OPTIONS]
+```
+
+### Basic Usage
+
+```bash
+cargo run --release -- account new --name alice
+```
+
+**Output:**
+```
+Generated new keypair:
+
+  Address:     0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  Public Key:  2a6e9b5d1f4a7c9e2b8d5f3a1c6e8f4a...
+  Private Key: 5d1f4a7c9e2b8d5f3a1c6e8f4a2b9d7f...
+
+✓  Saved to: data/keys/alice.json
+
+Keep your private key safe!
+```
+
+### Options
+
+#### Name
+
+```bash
+--name <NAME>
+```
+
+Saves the keypair with a custom filename. If omitted, uses a truncated address.
+
+**Example:**
+```bash
+minichain account new --name bob
+# Saves to: data/keys/bob.json
+
+minichain account new
+# Saves to: data/keys/account_3f8c2a6e.json
+```
+
+#### Data Directory
+
+```bash
+--data-dir <PATH>
+```
+
+Specifies where to save the keypair. Defaults to `./data`.
+
+### Keypair File Format
+
+Keypairs are saved as JSON files:
+
+```json
+{
+  "address": "0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e",
+  "public_key": "2a6e9b5d1f4a7c9e2b8d5f3a1c6e8f4a...",
+  "private_key": "5d1f4a7c9e2b8d5f3a1c6e8f4a2b9d7f..."
+}
+```
+
+<Warning>
+Private keys allow full control of the account. Never share them or commit to version control. Add `data/keys/` to your `.gitignore`.
+</Warning>
+
+## List Keypairs
+
+Show all saved keypair files.
+
+```bash
+minichain account list [OPTIONS]
+```
+
+### Example
+
+```bash
+cargo run --release -- account list
+```
+
+**Output:**
+```
+Saved Keypairs:
+
+  authority_0.json: 0xf4a5e8c2b9d7f3a1e6b8c4d9f2a5e8c1
+  alice.json:       0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  bob.json:         0x8d2c5e9f1a4b7c3d6e9f2a5c8b1d4e7f
+```
+
+If no keypairs exist:
+```
+No keypairs found.
+Use minichain account new to create a new keypair.
+```
+
+## Check Balance
+
+Query the balance of any address.
+
+```bash
+minichain account balance <ADDRESS>
+```
+
+### Example
+
+```bash
+cargo run --release -- account balance 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+```
+
+**Output:**
+```
+  Address: 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  Balance: 50000
+```
+
+### Address Format
+
+Addresses must be in hexadecimal format with the `0x` prefix:
+
+- ✓ `0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e`
+- ✗ `3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e` (missing prefix)
+- ✗ `0x3f8c` (too short)
+
+<Note>
+You can query any address, even if you don't have the private key. Accounts with zero balance still exist with a default state.
+</Note>
+
+## Account Information
+
+Show detailed account state including nonce and contract code.
+
+```bash
+minichain account info <ADDRESS>
+```
+
+### Example
+
+For a regular account:
+
+```bash
+cargo run --release -- account info 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+```
+
+**Output:**
+```
+Account Information:
+
+  Address:      0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  Balance:      48500
+  Nonce:        3
+  Is Contract:  No
+```
+
+For a contract account:
+
+```bash
+cargo run --release -- account info 0xa7b3c9e5d1f4a8c2b6e9d2f5a8c1e4b7
+```
+
+**Output:**
+```
+Account Information:
+
+  Address:      0xa7b3c9e5d1f4a8c2b6e9d2f5a8c1e4b7
+  Balance:      0
+  Nonce:        0
+  Is Contract:  Yes
+  Code Hash:    0x8f2a5c9e1d4b7f3a6c9e2d5f8a1c4e7b...
+```
+
+### Account State Fields
+
+- **Address:** The account's unique identifier
+- **Balance:** Current token balance
+- **Nonce:** Number of transactions sent from this account (prevents replay attacks)
+- **Is Contract:** Whether this account contains contract bytecode
+- **Code Hash:** Blake3 hash of the contract bytecode (contracts only)
+
+## Mint Tokens
+
+Mint tokens to any account. **Only authorities can mint tokens.**
+
+```bash
+minichain account mint --from <AUTHORITY> --to <ADDRESS> --amount <AMOUNT>
+```
+
+### Example
+
+```bash
+cargo run --release -- account mint \
+  --from authority_0 \
+  --to 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e \
+  --amount 50000
+```
+
+**Output:**
+```
+Minting tokens...
+
+  Authority: 0xf4a5e8c2b9d7f3a1e6b8c4d9f2a5e8c1
+  Recipient: 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  Amount:    50000
+
+✓  Minted 50000 tokens
+    New balance: 50000
+```
+
+### Options
+
+#### From Authority
+
+```bash
+--from <NAME>
+```
+
+Keypair name of the authority (without `.json` extension). Must be one of the authorities generated during `init`.
+
+**Example:**
+```bash
+--from authority_0
+--from authority_1
+```
+
+#### To Address
+
+```bash
+--to <ADDRESS>
+```
+
+Recipient address in hexadecimal format.
+
+#### Amount
+
+```bash
+--amount <AMOUNT>
+```
+
+Number of tokens to mint.
+
+### Authority Validation
+
+The mint command verifies the caller is a registered authority:
+
+```bash
+$ minichain account mint --from alice --to 0xABC... --amount 1000
+Error: Address 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e is not an authority. 
+Only authorities can mint tokens.
+Authorities: 0xf4a5e8c2b9d7f3a1...
+```
+
+<Warning>
+Minting increases the total token supply. In production systems, implement proper governance around minting permissions.
+</Warning>
+
+## Complete Workflow
+
+Here's a typical account setup flow:
+
+```bash
+# 1. Initialize blockchain (creates authority_0)
+minichain init --authorities 1
+
+# 2. Create user accounts
+minichain account new --name alice
+minichain account new --name bob
+
+# 3. List all accounts
+minichain account list
+# Output:
+#   authority_0.json: 0xf4a5e8c2b9d7f3a1...
+#   alice.json:       0x3f8c2a6e9b5d1f4a...
+#   bob.json:         0x8d2c5e9f1a4b7c3d...
+
+# 4. Check initial balance (should be 0)
+minichain account balance 0x3f8c2a6e9b5d1f4a...
+# Output: Balance: 0
+
+# 5. Mint tokens to Alice
+minichain account mint \
+  --from authority_0 \
+  --to 0x3f8c2a6e9b5d1f4a... \
+  --amount 50000
+
+# 6. Verify balance
+minichain account balance 0x3f8c2a6e9b5d1f4a...
+# Output: Balance: 50000
+
+# 7. View full account info
+minichain account info 0x3f8c2a6e9b5d1f4a...
+# Output:
+#   Balance: 50000
+#   Nonce: 0
+#   Is Contract: No
+```
+
+## Common Errors
+
+### Keypair Not Found
+
+```bash
+$ minichain account mint --from alice --to 0xABC... --amount 1000
+Error: Keypair file not found: data/keys/alice.json. 
+Use 'minichain account new' to create one.
+```
+
+**Solution:** Create the keypair first with `account new`.
+
+### Invalid Address Format
+
+```bash
+$ minichain account balance abc123
+Error: Invalid address format: abc123
+```
+
+**Solution:** Use the correct format: `0x` prefix + 32 hex characters.
+
+### Chain Not Initialized
+
+```bash
+$ minichain account balance 0xABC...
+Error: Failed to open storage. Did you run 'minichain init'?
+```
+
+**Solution:** Run `minichain init` first.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Send Transactions" icon="paper-plane" href="/cli/transactions">
+    Transfer tokens between accounts
+  </Card>
+  <Card title="Deploy Contracts" icon="rocket" href="/cli/contract-operations">
+    Deploy smart contracts from your account
+  </Card>
+</CardGroup>

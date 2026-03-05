@@ -1,0 +1,406 @@
+---
+title: Installation
+description: Install Rust and build Minichain from source in just a few minutes
+---
+
+# Installation Guide
+
+Minichain is written entirely in Rust and requires Rust 1.70 or later. This guide will walk you through installing Rust and building Minichain from source.
+
+## Prerequisites
+
+### Install Rust
+
+Minichain requires **Rust 1.70+**. If you don't have Rust installed, use `rustup`:
+
+<CodeGroup>
+```bash "macOS / Linux"
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+```powershell "Windows"
+# Download and run rustup-init.exe from:
+# https://win.rustup.rs/
+```
+</CodeGroup>
+
+After installation, verify Rust is installed:
+
+```bash
+rustc --version
+```
+
+You should see output like:
+
+```
+rustc 1.70.0 (or later)
+```
+
+<Note>
+If `rustc` is not found, restart your terminal or run:
+```bash
+source $HOME/.cargo/env
+```
+</Note>
+
+### System Requirements
+
+Minichain has minimal system requirements:
+
+- **OS**: Linux, macOS, or Windows
+- **RAM**: 512MB minimum
+- **Disk**: 50MB for the binary + space for blockchain data
+- **CPU**: Any modern processor
+
+## Build from Source
+
+<Steps>
+  <Step title="Clone the Repository">
+    Clone the Minichain repository from GitHub:
+    
+    ```bash
+    git clone https://github.com/jayendra-info/minichain.git
+    cd minichain
+    ```
+    
+    <Note>
+    Replace the repository URL with your fork if you're contributing to Minichain.
+    </Note>
+  </Step>
+  
+  <Step title="Build the Project">
+    Build the project in release mode for optimal performance:
+    
+    ```bash
+    cargo build --release
+    ```
+    
+    This will:
+    - Download and compile all dependencies
+    - Compile all 7 crates in the workspace
+    - Create an optimized binary
+    - Take 2-5 minutes depending on your system
+    
+    You'll see output like:
+    
+    ```
+       Compiling minichain-core v0.1.0
+       Compiling minichain-storage v0.1.0
+       Compiling minichain-vm v0.1.0
+       Compiling minichain-assembler v0.1.0
+       Compiling minichain-consensus v0.1.0
+       Compiling minichain-chain v0.1.0
+       Compiling minichain-cli v0.1.0
+        Finished release [optimized] target(s)
+    ```
+  </Step>
+  
+  <Step title="Locate the Binary">
+    The compiled binary is located at:
+    
+    ```bash
+    target/release/minichain
+    ```
+    
+    You can run it directly:
+    
+    ```bash
+    ./target/release/minichain --help
+    ```
+    
+    Or use `cargo run`:
+    
+    ```bash
+    cargo run --release -- --help
+    ```
+  </Step>
+  
+  <Step title="Install Globally (Optional)">
+    To install the binary to your system PATH:
+    
+    ```bash
+    cargo install --path crates/cli
+    ```
+    
+    This installs `minichain` to `~/.cargo/bin/`, which should be in your PATH.
+    
+    Now you can run:
+    
+    ```bash
+    minichain --help
+    ```
+    
+    from any directory.
+  </Step>
+</Steps>
+
+## Verify Installation
+
+Test that Minichain is working correctly:
+
+```bash
+# Using the binary directly
+./target/release/minichain --version
+
+# Or with cargo run
+cargo run --release -- --version
+
+# Or if installed globally
+minichain --version
+```
+
+You should see:
+
+```
+minichain 0.1.0
+```
+
+View available commands:
+
+```bash
+minichain --help
+```
+
+Output:
+
+```
+A minimal toy blockchain implementation in Rust
+
+Usage: minichain <COMMAND>
+
+Commands:
+  init     Initialize a new blockchain
+  account  Account management
+  tx       Transaction operations
+  deploy   Deploy a smart contract
+  call     Call a smart contract
+  block    Block operations
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+```
+
+## Development Setup
+
+If you plan to contribute or modify Minichain, here are useful development tools:
+
+### Run Tests
+
+Minichain includes 26+ unit and integration tests:
+
+<CodeGroup>
+```bash "All Tests"
+# Run all tests across all crates
+cargo test --all
+```
+
+```bash "Specific Crate"
+# Test a specific crate
+cargo test -p minichain-core
+cargo test -p minichain-vm
+cargo test -p minichain-chain
+```
+
+```bash "With Output"
+# Run tests with println! output
+cargo test -- --nocapture
+```
+
+```bash "Specific Test"
+# Run a specific test
+cargo test test_vm_add
+```
+</CodeGroup>
+
+All tests should pass:
+
+```
+running 26 tests
+test tests::test_hash ... ok
+test tests::test_keypair ... ok
+test tests::test_vm_add ... ok
+...
+test result: ok. 26 passed; 0 failed
+```
+
+### Code Quality Tools
+
+<CodeGroup>
+```bash "Check Compilation"
+# Check if code compiles without building
+cargo check
+```
+
+```bash "Linting"
+# Run Clippy linter for best practices
+cargo clippy --all-targets --all-features
+```
+
+```bash "Formatting"
+# Format code according to Rust style guide
+cargo fmt
+
+# Check formatting without modifying
+cargo fmt -- --check
+```
+
+```bash "Documentation"
+# Build and open documentation
+cargo doc --open
+```
+</CodeGroup>
+
+### Watch Mode
+
+Install `cargo-watch` for automatic rebuilds:
+
+```bash
+cargo install cargo-watch
+
+# Auto-rebuild on file changes
+cargo watch -x build
+
+# Auto-test on file changes
+cargo watch -x test
+```
+
+## Project Structure
+
+Once built, your workspace contains:
+
+```
+minichain/
+├── Cargo.toml                 # Workspace configuration
+├── Cargo.lock                 # Dependency lock file
+├── target/                    # Build artifacts
+│   └── release/
+│       └── minichain          # Compiled binary
+├── crates/                    # Source code
+│   ├── core/                  # Blockchain primitives
+│   ├── storage/               # Persistent storage
+│   ├── vm/                    # Virtual machine
+│   ├── assembler/             # Assembly compiler
+│   ├── consensus/             # PoA consensus
+│   ├── chain/                 # Blockchain orchestration
+│   └── cli/                   # Command-line interface
+├── contracts/                 # Example contracts
+│   ├── counter.asm
+│   ├── storage_test.asm
+│   └── token.asm
+├── tests/                     # Integration tests
+└── docs/                      # Documentation
+```
+
+## Workspace Dependencies
+
+Minichain uses the following key dependencies:
+
+### Cryptography
+- **blake3** (1.5): Fast hashing for blocks and transactions
+- **ed25519-dalek** (2.1): Digital signatures for transaction signing
+- **rand** (0.8): Cryptographic randomness for key generation
+
+### Storage
+- **sled** (0.34): Embedded database for persistent blockchain state
+
+### Serialization
+- **serde** (1.0): Serialization framework
+- **serde_json** (1.0): JSON serialization for configuration
+- **bincode** (1.3): Binary serialization for blockchain data
+
+### CLI
+- **clap** (4.4): Command-line argument parsing
+- **colored** (2.1): Terminal color output
+
+### Utilities
+- **thiserror** (1.0): Error handling
+- **anyhow** (1.0): Error context
+- **hex** (0.4): Hexadecimal encoding/decoding
+- **chrono** (0.4): Timestamp handling
+
+### Assembler
+- **logos** (0.14): Lexer generator for assembly language
+
+### Logging
+- **tracing** (0.1): Structured logging
+- **tracing-subscriber** (0.3): Log output formatting
+
+All dependencies are managed in `Cargo.toml` and automatically downloaded during build.
+
+## Troubleshooting
+
+### Compilation Errors
+
+**Issue**: `error: linker 'cc' not found`
+
+<CodeGroup>
+```bash "Ubuntu/Debian"
+sudo apt-get install build-essential
+```
+
+```bash "Fedora/RHEL"
+sudo dnf install gcc
+```
+
+```bash "macOS"
+xcode-select --install
+```
+</CodeGroup>
+
+### Outdated Rust Version
+
+**Issue**: `error: package requires rustc 1.70 or newer`
+
+```bash
+rustup update stable
+```
+
+### Cargo Command Not Found
+
+**Issue**: `bash: cargo: command not found`
+
+Restart your terminal or manually add to PATH:
+
+```bash
+source $HOME/.cargo/env
+```
+
+### Build Takes Too Long
+
+**Issue**: First build is slow (5+ minutes)
+
+This is normal! Subsequent builds are much faster due to caching. Use `cargo build` (without `--release`) for faster debug builds during development.
+
+### Disk Space Issues
+
+**Issue**: `error: no space left on device`
+
+Clean old build artifacts:
+
+```bash
+cargo clean
+```
+
+## Next Steps
+
+Now that Minichain is installed:
+
+1. **Run the Quickstart**: Follow the [Quickstart Guide](/quickstart) to initialize your first blockchain
+2. **Learn the Basics**: Read [Core Concepts](/core-concepts/architecture) to understand the architecture
+3. **Write Contracts**: Study the [Assembly Language](/smart-contracts/assembly-language) guide
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get your blockchain running in 5 minutes
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/core-concepts/architecture">
+    Learn about accounts, transactions, and blocks
+  </Card>
+</CardGroup>
+
+<Warning>
+Minichain is for educational purposes only. Do not use in production environments.
+</Warning>

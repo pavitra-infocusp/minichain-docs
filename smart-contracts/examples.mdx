@@ -1,0 +1,560 @@
+---
+title: Contract Examples
+description: Complete smart contract examples for Minichain with detailed explanations
+---
+
+This page provides complete, annotated smart contract examples demonstrating various patterns and techniques.
+
+## Simple Counter
+
+A basic counter that increments a storage value on each call.
+
+<Tabs>
+  <Tab title="Contract">
+    ```asm counter.asm
+    ; Simple counter contract
+    ; Increments a storage value by 1 on each call
+    .entry main
+
+    .const STORAGE_COUNTER 0
+
+    main:
+        LOADI R0, STORAGE_COUNTER   ; Load storage slot address
+        SLOAD R1, R0                ; Load current counter value
+        LOADI R2, 1                 ; Load increment value
+        ADD R1, R1, R2              ; Increment: R1 = R1 + 1
+        SSTORE R0, R1               ; Store new value
+        LOG R1                      ; Emit new counter value
+        HALT                        ; Exit successfully
+    ```
+  </Tab>
+  
+  <Tab title="Deploy & Call">
+    ```bash
+    # Deploy the counter
+    minichain deploy \
+      --from alice \
+      --source counter.asm \
+      --gas-limit 100000
+    
+    # Produce block to finalize deployment
+    minichain block produce --authority authority_0
+    
+    # Call the counter (increment from 0 to 1)
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    
+    # Call again (increment from 1 to 2)
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    ```
+  </Tab>
+  
+  <Tab title="Explanation">
+    **How it works:**
+    
+    1. **LOADI R0, STORAGE_COUNTER** - Load the storage slot key (0) into R0
+    2. **SLOAD R1, R0** - Read the current counter value from storage
+    3. **LOADI R2, 1** - Load the increment amount
+    4. **ADD R1, R1, R2** - Add 1 to the counter
+    5. **SSTORE R0, R1** - Write the new value back to storage
+    6. **LOG R1** - Emit the new value for debugging/monitoring
+    7. **HALT** - End execution successfully
+    
+    **Storage layout:**
+    - Slot 0: Counter value (starts at 0)
+    
+    **Gas cost:**
+    - ~25,000 gas per call (storage read + write + arithmetic)
+  </Tab>
+</Tabs>
+
+---
+
+## Owner-Only Access
+
+A contract that restricts execution to its deployer.
+
+<Tabs>
+  <Tab title="Contract">
+    ```asm owner.asm
+    ; Owner-only contract
+    ; Only the deployer can call this contract
+    .entry main
+
+    .const STORAGE_OWNER 0
+    .const STORAGE_INITIALIZED 1
+    .const STORAGE_VALUE 2
+
+    main:
+        ; Check if initialized
+        LOADI R0, STORAGE_INITIALIZED
+        SLOAD R1, R0
+        LOADI R2, 1
+        EQ R3, R1, R2               ; Is initialized?
+        LOADI R4, check_owner
+        JUMPI R3, R4                ; Jump if initialized
+
+        ; First call - store deployer as owner
+        CALLER R5
+        LOADI R6, STORAGE_OWNER
+        SSTORE R6, R5               ; Store owner address
+        SSTORE R0, R2               ; Mark as initialized
+        HALT
+
+    check_owner:
+        ; Verify caller is owner
+        CALLER R7
+        LOADI R8, STORAGE_OWNER
+        SLOAD R9, R8                ; Load owner address
+        EQ R10, R7, R9              ; Is caller == owner?
+        LOADI R11, authorized
+        JUMPI R10, R11              ; Jump if authorized
+        REVERT                      ; Revert if not owner
+
+    authorized:
+        ; Owner-only logic here
+        LOADI R12, STORAGE_VALUE
+        SLOAD R13, R12
+        LOADI R14, 1
+        ADD R13, R13, R14           ; Increment value
+        SSTORE R12, R13
+        LOG R13
+        HALT
+    ```
+  </Tab>
+  
+  <Tab title="Deploy & Call">
+    ```bash
+    # Deploy as alice
+    minichain deploy \
+      --from alice \
+      --source owner.asm \
+      --gas-limit 150000
+    minichain block produce --authority authority_0
+    
+    # Alice can call (she's the owner)
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # ✓ Success
+    
+    # Bob cannot call (not the owner)
+    minichain call --from bob --to <contract-address>
+    minichain block produce --authority authority_0
+    # ✗ Execution reverted
+    ```
+  </Tab>
+  
+  <Tab title="Explanation">
+    **How it works:**
+    
+    **First call (initialization):**
+    1. Check if `STORAGE_INITIALIZED` is set
+    2. If not initialized, store caller as owner
+    3. Mark contract as initialized
+    
+    **Subsequent calls:**
+    1. Check if caller matches stored owner
+    2. If not, call `REVERT` to roll back transaction
+    3. If authorized, execute protected logic
+    
+    **Storage layout:**
+    - Slot 0: Owner address
+    - Slot 1: Initialization flag (0 or 1)
+    - Slot 2: Protected value
+    
+    **Security:**
+    - Owner is set on first call (deployment)
+    - Cannot be changed after initialization
+    - All unauthorized calls revert
+  </Tab>
+</Tabs>
+
+---
+
+## Simple Token Balance
+
+A minimal token contract tracking balances.
+
+<Tabs>
+  <Tab title="Contract">
+    ```asm token.asm
+    ; Minimal token contract
+    ; Each address has a balance in storage
+    .entry main
+
+    .const STORAGE_TOTAL_SUPPLY 0
+    .const INITIAL_SUPPLY 1000000
+
+    main:
+        ; Check if initialized
+        LOADI R0, STORAGE_TOTAL_SUPPLY
+        SLOAD R1, R0
+        LOADI R2, 0
+        EQ R3, R1, R2               ; Is total supply 0?
+        LOADI R4, mint_initial
+        JUMPI R3, R4                ; Initialize if needed
+        
+        ; Normal execution - just show caller balance
+        CALLER R5
+        SLOAD R6, R5                ; Load balance using address as key
+        LOG R6                      ; Emit balance
+        HALT
+
+    mint_initial:
+        ; Mint initial supply to deployer
+        CALLER R7
+        LOADI R8, INITIAL_SUPPLY
+        SSTORE R7, R8               ; Store balance
+        SSTORE R0, R8               ; Store total supply
+        LOG R8                      ; Emit minted amount
+        HALT
+    ```
+  </Tab>
+  
+  <Tab title="Deploy & Call">
+    ```bash
+    # Deploy as alice
+    minichain deploy \
+      --from alice \
+      --source token.asm \
+      --gas-limit 150000
+    minichain block produce --authority authority_0
+    # Alice receives 1,000,000 tokens
+    
+    # Check alice's balance
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # LOG: 1000000
+    
+    # Check bob's balance (0)
+    minichain call --from bob --to <contract-address>
+    minichain block produce --authority authority_0
+    # LOG: 0
+    ```
+  </Tab>
+  
+  <Tab title="Explanation">
+    **How it works:**
+    
+    **First call (minting):**
+    1. Check if total supply is 0
+    2. If yes, mint initial supply to caller
+    3. Store balance using address as storage key
+    
+    **Subsequent calls:**
+    1. Read caller's balance from storage (address as key)
+    2. Emit balance via LOG
+    
+    **Storage layout:**
+    - Slot 0: Total supply
+    - Slot (address): Balance of given address
+    
+    **Note:**
+    This is a simplified example. A real token would need transfer logic, allowances, etc.
+  </Tab>
+</Tabs>
+
+---
+
+## Conditional Update
+
+A contract that only updates storage under certain conditions.
+
+<Tabs>
+  <Tab title="Contract">
+    ```asm conditional.asm
+    ; Conditional storage update
+    ; Only allows updating if value is below threshold
+    .entry main
+
+    .const STORAGE_VALUE 0
+    .const THRESHOLD 100
+    .const INCREMENT 10
+
+    main:
+        ; Load current value
+        LOADI R0, STORAGE_VALUE
+        SLOAD R1, R0                ; R1 = current value
+        LOG R1                      ; Log current value
+        
+        ; Check if below threshold
+        LOADI R2, THRESHOLD
+        LT R3, R1, R2               ; R3 = (value < 100)
+        LOADI R4, can_update
+        JUMPI R3, R4                ; Jump if can update
+        
+        ; Value too high - revert
+        REVERT
+
+    can_update:
+        ; Increment value
+        LOADI R5, INCREMENT
+        ADD R1, R1, R5              ; R1 += 10
+        SSTORE R0, R1               ; Store new value
+        LOG R1                      ; Log new value
+        HALT
+    ```
+  </Tab>
+  
+  <Tab title="Deploy & Call">
+    ```bash
+    # Deploy contract
+    minichain deploy \
+      --from alice \
+      --source conditional.asm \
+      --gas-limit 100000
+    minichain block produce --authority authority_0
+    
+    # Call 1: 0 -> 10
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # LOG: 0, 10
+    
+    # Call 2: 10 -> 20
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # LOG: 10, 20
+    
+    # ... (continue calling)
+    
+    # Call 10: 90 -> 100 (last successful call)
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # LOG: 90, 100
+    
+    # Call 11: 100 -> REVERT (threshold reached)
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # Error: Execution reverted
+    ```
+  </Tab>
+  
+  <Tab title="Explanation">
+    **How it works:**
+    
+    1. **SLOAD** - Read current value from storage
+    2. **LOG** - Emit current value
+    3. **LT** - Compare value to threshold (100)
+    4. **JUMPI** - Jump to update logic if below threshold
+    5. **REVERT** - Revert if at or above threshold
+    6. **ADD** - Increment value by 10
+    7. **SSTORE** - Store new value
+    8. **LOG** - Emit new value
+    
+    **Storage layout:**
+    - Slot 0: Value (incremented by 10 each call until 100)
+    
+    **Use case:**
+    - Rate limiting
+    - Capped counters
+    - Conditional state machines
+  </Tab>
+</Tabs>
+
+---
+
+## Loop Example
+
+Demonstrates implementing a loop in assembly.
+
+<Tabs>
+  <Tab title="Contract">
+    ```asm loop.asm
+    ; Loop example - sum numbers 1 to 10
+    .entry main
+
+    .const MAX_ITERATIONS 10
+
+    main:
+        LOADI R0, 0                 ; Counter (i = 0)
+        LOADI R1, 0                 ; Sum (sum = 0)
+        LOADI R2, MAX_ITERATIONS    ; Max value
+
+    loop:
+        ; Add counter to sum
+        ADD R1, R1, R0              ; sum += i
+        
+        ; Increment counter
+        LOADI R3, 1
+        ADD R0, R0, R3              ; i++
+        
+        ; Check if done
+        LE R4, R0, R2               ; i <= 10?
+        LOADI R5, loop
+        JUMPI R4, R5                ; Continue if i <= 10
+        
+        ; Done - emit result
+        LOG R1                      ; Log sum (should be 55)
+        HALT
+    ```
+  </Tab>
+  
+  <Tab title="Deploy & Call">
+    ```bash
+    # Deploy
+    minichain deploy \
+      --from alice \
+      --source loop.asm \
+      --gas-limit 200000
+    minichain block produce --authority authority_0
+    
+    # Call - computes sum of 1+2+3+...+10
+    minichain call --from alice --to <contract-address>
+    minichain block produce --authority authority_0
+    # LOG: 55
+    ```
+  </Tab>
+  
+  <Tab title="Explanation">
+    **How it works:**
+    
+    1. Initialize counter (R0) to 0
+    2. Initialize sum (R1) to 0
+    3. Load max value (R2) to 10
+    4. **Loop body:**
+       - Add counter to sum
+       - Increment counter
+       - Check if counter is less than or equal to max
+       - Jump back to loop start if true
+    5. Emit final sum (55)
+    
+    **Loop pattern:**
+    ```asm
+    init:
+        LOADI counter, 0
+        LOADI max, N
+    
+    loop:
+        ; Loop body here
+        
+        ; Increment
+        ADDI counter, counter, 1
+        
+        ; Check condition
+        LT/LE/etc result, counter, max
+        LOADI target, loop
+        JUMPI result, target
+    ```
+    
+    **Gas warning:**
+    Loops consume gas per iteration. Set gas limits accordingly.
+  </Tab>
+</Tabs>
+
+---
+
+## Payment Contract
+
+Accepts payments and tracks the total received.
+
+<Tabs>
+  <Tab title="Contract">
+    ```asm payment.asm
+    ; Payment contract - accepts and tracks payments
+    .entry main
+
+    .const STORAGE_TOTAL_RECEIVED 0
+    .const MIN_PAYMENT 100
+
+    main:
+        ; Get payment amount
+        CALLVALUE R0                ; R0 = sent value
+        LOG R0                      ; Log payment
+        
+        ; Check minimum payment
+        LOADI R1, MIN_PAYMENT
+        LT R2, R0, R1               ; payment < 100?
+        LOADI R3, too_small
+        JUMPI R2, R3                ; Jump if too small
+        
+        ; Accept payment - add to total
+        LOADI R4, STORAGE_TOTAL_RECEIVED
+        SLOAD R5, R4                ; Load total
+        ADD R5, R5, R0              ; Add payment
+        SSTORE R4, R5               ; Store new total
+        LOG R5                      ; Log new total
+        HALT
+
+    too_small:
+        ; Payment too small - revert
+        REVERT
+    ```
+  </Tab>
+  
+  <Tab title="Deploy & Call">
+    ```bash
+    # Deploy
+    minichain deploy \
+      --from alice \
+      --source payment.asm \
+      --gas-limit 150000
+    minichain block produce --authority authority_0
+    
+    # Send 50 (too small - reverts)
+    minichain call \
+      --from alice \
+      --to <contract-address> \
+      --amount 50
+    minichain block produce --authority authority_0
+    # Error: Execution reverted
+    
+    # Send 200 (accepted)
+    minichain call \
+      --from alice \
+      --to <contract-address> \
+      --amount 200
+    minichain block produce --authority authority_0
+    # LOG: 200, 200 (payment, total)
+    
+    # Send 300 (accepted)
+    minichain call \
+      --from alice \
+      --to <contract-address> \
+      --amount 300
+    minichain block produce --authority authority_0
+    # LOG: 300, 500 (payment, total)
+    ```
+  </Tab>
+  
+  <Tab title="Explanation">
+    **How it works:**
+    
+    1. **CALLVALUE** - Get amount sent with transaction
+    2. **Compare** to minimum payment (100)
+    3. **REVERT** if payment too small
+    4. **SLOAD** - Load current total from storage
+    5. **ADD** - Add new payment to total
+    6. **SSTORE** - Store updated total
+    
+    **Storage layout:**
+    - Slot 0: Total value received
+    
+    **Balance tracking:**
+    The contract's balance is automatically updated by the VM when value is sent. Storage tracks cumulative receipts.
+    
+    **Use cases:**
+    - Donation contracts
+    - Payment processors
+    - Crowdfunding
+  </Tab>
+</Tabs>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Assembly Reference" icon="book" href="/smart-contracts/assembly-language">
+    Complete assembly language reference
+  </Card>
+  <Card title="Deploy Contracts" icon="rocket" href="/smart-contracts/deploying-contracts">
+    Learn how to deploy your contracts
+  </Card>
+  <Card title="VM Instructions" icon="microchip" href="/vm/opcodes">
+    Full instruction set reference
+  </Card>
+  <Card title="Gas Optimization" icon="gauge" href="/core-concepts/gas-system">
+    Optimize your contracts for gas efficiency
+  </Card>
+</CardGroup>

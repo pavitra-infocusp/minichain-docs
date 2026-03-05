@@ -1,0 +1,171 @@
+---
+title: Virtual Machine Overview
+description: Introduction to Minichain's register-based virtual machine
+---
+
+Minichain features a **register-based virtual machine** designed for efficient smart contract execution. Unlike traditional stack-based VMs (like the EVM), the Minichain VM operates on a set of registers, providing better performance and more compact bytecode.
+
+## Architecture
+
+The VM is built around three key components:
+
+<CardGroup cols={3}>
+  <Card title="Registers" icon="microchip">
+    16 general-purpose 64-bit registers (R0-R15)
+  </Card>
+  <Card title="Memory" icon="memory">
+    Linear byte-addressable RAM (max 1MB)
+  </Card>
+  <Card title="Storage" icon="database">
+    Persistent key-value storage (32-byte keys/values)
+  </Card>
+</CardGroup>
+
+## Register-Based vs Stack-Based
+
+<AccordionGroup>
+  <Accordion title="Why Register-Based?">
+    Register-based VMs offer several advantages over stack-based architectures:
+
+    - **Fewer instructions**: Operations work directly on registers instead of push/pop sequences
+    - **Compact bytecode**: No need for stack manipulation instructions
+    - **Better performance**: Reduced instruction count and memory access
+    - **Easier optimization**: Register allocation enables better compiler optimizations
+
+    ### Example Comparison
+
+    Computing `c = a + b`:
+
+    **Stack-Based (EVM-style)**:
+    ```
+    PUSH a
+    PUSH b
+    ADD
+    POP c
+    ```
+
+    **Register-Based (Minichain)**:
+    ```
+    ADD R2, R0, R1
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Key Features
+
+### 40+ Opcodes
+
+The VM supports over 40 opcodes organized into categories:
+
+- **Control Flow**: HALT, NOP, JUMP, JUMPI, CALL, RET, REVERT
+- **Arithmetic**: ADD, SUB, MUL, DIV, MOD, ADDI
+- **Bitwise**: AND, OR, XOR, NOT, SHL, SHR
+- **Comparison**: EQ, NE, LT, GT, LE, GE, ISZERO
+- **Memory**: LOAD8, LOAD64, STORE8, STORE64, MSIZE, MCOPY
+- **Storage**: SLOAD, SSTORE
+- **Immediate**: LOADI, MOV
+- **Context**: CALLER, CALLVALUE, ADDRESS, BLOCKNUMBER, TIMESTAMP, GAS
+- **Debug**: LOG
+
+### Gas Metering
+
+All operations consume gas to prevent infinite loops and resource exhaustion:
+
+<CodeGroup>
+```rust Example: Gas Costs
+const ZERO: u64 = 0;        // HALT, NOP
+const BASE: u64 = 2;        // ADD, SUB, MOV
+const LOW: u64 = 3;         // MUL, comparisons
+const MID: u64 = 5;         // DIV, MOD, shifts
+const SLOAD: u64 = 100;     // Storage read
+const SSTORE: u64 = 20000;  // Storage write (new)
+```
+</CodeGroup>
+
+### Execution Context
+
+Each VM execution has access to:
+
+- **Caller address**: Who initiated the transaction
+- **Contract address**: The current contract's address
+- **Call value**: Amount sent with the transaction
+- **Block number**: Current blockchain height
+- **Timestamp**: Block timestamp
+- **Gas remaining**: Available gas for execution
+
+## VM Structure
+
+From the source code at `crates/vm/src/executor.rs:44`:
+
+```rust
+pub struct Vm {
+    registers: Registers,        // 16 x 64-bit registers
+    memory: Memory,              // Linear RAM (max 1MB)
+    pc: usize,                   // Program counter
+    gas: GasMeter,               // Gas tracking
+    bytecode: Vec<u8>,           // Executable code
+    halted: bool,                // Execution state
+    
+    // Execution context
+    caller: Address,
+    address: Address,
+    call_value: u64,
+    block_number: u64,
+    timestamp: u64,
+    
+    storage: Option<Box<dyn StorageBackend>>,
+    logs: Vec<u64>,
+}
+```
+
+## Example Program
+
+Here's a simple program that adds two numbers:
+
+```rust
+// Program: Add 10 + 20 and log the result
+let bytecode = vec![
+    // LOADI R0, 10
+    0x70, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    
+    // LOADI R1, 20
+    0x70, 0x10, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    
+    // ADD R2, R0, R1
+    0x10, 0x20, 0x10,
+    
+    // LOG R2
+    0xF0, 0x20,
+    
+    // HALT
+    0x00,
+];
+
+let mut vm = Vm::new(
+    bytecode,
+    1_000_000,      // gas limit
+    caller_addr,
+    contract_addr,
+    0,              // call value
+);
+
+let result = vm.run()?;
+assert_eq!(result.logs, vec![30]);
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Registers & Memory" icon="memory" href="/vm/registers-and-memory">
+    Learn about the register file and memory model
+  </Card>
+  <Card title="Opcodes" icon="list" href="/vm/opcodes">
+    Complete opcode reference with encoding details
+  </Card>
+  <Card title="Gas Metering" icon="gauge" href="/vm/gas-metering">
+    Understand gas costs and metering
+  </Card>
+  <Card title="Execution Model" icon="play" href="/vm/execution-model">
+    Deep dive into the execution loop
+  </Card>
+</CardGroup>

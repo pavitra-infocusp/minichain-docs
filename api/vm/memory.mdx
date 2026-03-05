@@ -1,0 +1,406 @@
+---
+title: Memory
+description: Register and linear memory management for the VM
+---
+
+The memory module provides register and RAM management for VM execution.
+
+## Constants
+
+<ParamField path="NUM_REGISTERS" type="usize" default="16">
+  Number of general-purpose registers available in the VM
+</ParamField>
+
+## Registers Struct
+
+Manages 16 general-purpose 64-bit registers (R0-R15).
+
+```rust
+pub struct Registers {
+    values: [u64; NUM_REGISTERS],
+}
+```
+
+### Methods
+
+#### new
+
+Create a new register set with all values initialized to zero.
+
+```rust
+pub fn new() -> Self
+```
+
+<ResponseField name="registers" type="Registers">
+  New register set with all registers set to 0
+</ResponseField>
+
+#### get
+
+Get the value of a register.
+
+```rust
+pub fn get(&self, r: usize) -> u64
+```
+
+<ParamField path="r" type="usize" required>
+  Register index (0-15). Values outside this range are wrapped using modulo.
+</ParamField>
+
+<ResponseField name="value" type="u64">
+  Current value in the register
+</ResponseField>
+
+**Example**:
+```rust
+let mut regs = Registers::new();
+regs.set(5, 42);
+assert_eq!(regs.get(5), 42);
+```
+
+#### set
+
+Set the value of a register.
+
+```rust
+pub fn set(&mut self, r: usize, value: u64)
+```
+
+<ParamField path="r" type="usize" required>
+  Register index (0-15). Values outside this range are wrapped using modulo.
+</ParamField>
+
+<ParamField path="value" type="u64" required>
+  Value to store in the register
+</ParamField>
+
+#### values
+
+Get a reference to all register values.
+
+```rust
+pub fn values(&self) -> &[u64; NUM_REGISTERS]
+```
+
+<ResponseField name="values" type="&[u64; 16]">
+  Immutable reference to the register array
+</ResponseField>
+
+**Example**:
+```rust
+let regs = Registers::new();
+let all_values = regs.values();
+println!("R0: {}, R1: {}", all_values[0], all_values[1]);
+```
+
+## Memory Struct
+
+Manages linear memory with dynamic expansion up to a maximum size.
+
+```rust
+pub struct Memory {
+    data: Vec<u8>,
+    max_size: usize,
+}
+```
+
+<ParamField path="data" type="Vec<u8>">
+  Dynamically sized memory buffer
+</ParamField>
+
+<ParamField path="max_size" type="usize">
+  Maximum allowed memory size in bytes (default: 1MB)
+</ParamField>
+
+### Methods
+
+#### new
+
+Create a new memory instance with specified maximum size.
+
+```rust
+pub fn new(max_size: usize) -> Self
+```
+
+<ParamField path="max_size" type="usize" required>
+  Maximum memory size in bytes
+</ParamField>
+
+<ResponseField name="memory" type="Memory">
+  New memory instance starting at 0 bytes, expandable to max_size
+</ResponseField>
+
+**Example**:
+```rust
+// 1MB memory limit
+let memory = Memory::new(1024 * 1024);
+```
+
+#### load8
+
+Load an 8-bit value from memory.
+
+```rust
+pub fn load8(&self, offset: u32) -> u8
+```
+
+<ParamField path="offset" type="u32" required>
+  Memory address to read from
+</ParamField>
+
+<ResponseField name="value" type="u8">
+  Byte at the specified offset, or 0 if out of bounds
+</ResponseField>
+
+**Note**: Reading beyond allocated memory returns 0 without error.
+
+#### load64
+
+Load a 64-bit value from memory (little-endian).
+
+```rust
+pub fn load64(&self, offset: u32) -> u64
+```
+
+<ParamField path="offset" type="u32" required>
+  Memory address to read from (must have 8 bytes available)
+</ParamField>
+
+<ResponseField name="value" type="u64">
+  64-bit value in little-endian format, or 0 if insufficient space
+</ResponseField>
+
+**Example**:
+```rust
+let mut mem = Memory::new(1024);
+mem.store64(0, 0x123456789ABCDEF0)?;
+assert_eq!(mem.load64(0), 0x123456789ABCDEF0);
+```
+
+#### store8
+
+Store an 8-bit value to memory.
+
+```rust
+pub fn store8(&mut self, offset: u32, value: u8) -> Result<(), VmError>
+```
+
+<ParamField path="offset" type="u32" required>
+  Memory address to write to
+</ParamField>
+
+<ParamField path="value" type="u8" required>
+  Byte value to store
+</ParamField>
+
+<ResponseField name="result" type="Result<(), VmError>">
+  Ok(()) on success, Err(VmError::MemoryOverflow) if offset >= max_size
+</ResponseField>
+
+**Note**: Memory automatically expands to accommodate the write if within max_size.
+
+#### store64
+
+Store a 64-bit value to memory (little-endian).
+
+```rust
+pub fn store64(&mut self, offset: u32, value: u64) -> Result<(), VmError>
+```
+
+<ParamField path="offset" type="u32" required>
+  Memory address to write to
+</ParamField>
+
+<ParamField path="value" type="u64" required>
+  64-bit value to store
+</ParamField>
+
+<ResponseField name="result" type="Result<(), VmError>">
+  Ok(()) on success, Err(VmError::MemoryOverflow) if offset + 8 > max_size
+</ResponseField>
+
+**Example**:
+```rust
+let mut mem = Memory::new(1024);
+mem.store64(100, 0xDEADBEEF)?;
+```
+
+#### mcopy
+
+Copy a region of memory from one location to another.
+
+```rust
+pub fn mcopy(&mut self, dest: u32, src: u32, length: u32) -> Result<(), VmError>
+```
+
+<ParamField path="dest" type="u32" required>
+  Destination address
+</ParamField>
+
+<ParamField path="src" type="u32" required>
+  Source address
+</ParamField>
+
+<ParamField path="length" type="u32" required>
+  Number of bytes to copy
+</ParamField>
+
+<ResponseField name="result" type="Result<(), VmError>">
+  Ok(()) on success, Err(VmError::MemoryOverflow) if operation exceeds max_size
+</ResponseField>
+
+**Note**: Handles overlapping regions correctly by creating a temporary copy.
+
+**Example**:
+```rust
+let mut mem = Memory::new(1024);
+mem.store64(0, 0x12345678)?;
+mem.mcopy(100, 0, 8)?;  // Copy 8 bytes from offset 0 to 100
+assert_eq!(mem.load64(100), 0x12345678);
+```
+
+#### size
+
+Get the current allocated memory size.
+
+```rust
+pub fn size(&self) -> usize
+```
+
+<ResponseField name="size" type="usize">
+  Number of bytes currently allocated
+</ResponseField>
+
+**Note**: This is the current size, not the maximum size. Memory grows dynamically.
+
+## Usage Examples
+
+### Basic Register Operations
+
+```rust
+use minichain_vm::{Registers, NUM_REGISTERS};
+
+let mut regs = Registers::new();
+
+// Set some register values
+regs.set(0, 100);
+regs.set(1, 200);
+regs.set(2, regs.get(0) + regs.get(1));
+
+assert_eq!(regs.get(2), 300);
+
+// Access all registers
+let all = regs.values();
+println!("All registers: {:?}", all);
+```
+
+### Memory Operations
+
+```rust
+use minichain_vm::Memory;
+
+let mut mem = Memory::new(1024 * 1024); // 1MB
+
+// Store individual bytes
+mem.store8(0, 0xFF)?;
+mem.store8(1, 0xAA)?;
+
+// Store 64-bit values
+mem.store64(100, 0xDEADBEEFCAFEBABE)?;
+
+// Load values back
+assert_eq!(mem.load8(0), 0xFF);
+assert_eq!(mem.load64(100), 0xDEADBEEFCAFEBABE);
+
+// Check memory size
+println!("Memory used: {} bytes", mem.size());
+```
+
+### Memory Copy Operations
+
+```rust
+use minichain_vm::Memory;
+
+let mut mem = Memory::new(4096);
+
+// Write a pattern
+for i in 0..10 {
+    mem.store8(i, i as u8)?;
+}
+
+// Copy the pattern
+mem.mcopy(100, 0, 10)?;
+
+// Verify the copy
+for i in 0..10 {
+    assert_eq!(mem.load8(100 + i), i as u8);
+}
+```
+
+### Memory Expansion
+
+```rust
+use minichain_vm::{Memory, VmError};
+
+let mut mem = Memory::new(256); // Small 256-byte limit
+
+// This works - within limit
+mem.store8(255, 0xFF)?;
+
+// This fails - exceeds limit
+let result = mem.store8(256, 0xFF);
+assert!(matches!(result, Err(VmError::MemoryOverflow)));
+
+// Memory size grows automatically
+assert_eq!(mem.size(), 256);
+```
+
+### Working with VM
+
+```rust
+use minichain_vm::{Vm, Memory, Registers};
+use minichain_core::Address;
+
+// Bytecode that uses memory:
+// LOADI R0, 42
+// LOADI R1, 100
+// STORE64 R1, R0
+// HALT
+let bytecode = vec![
+    0x70, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x70, 0x10, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x43, 0x10,
+    0x00,
+];
+
+let mut vm = Vm::new(
+    bytecode,
+    10000,
+    Address::zero(),
+    Address::zero(),
+    0,
+);
+
+let result = vm.run()?;
+assert!(result.success);
+
+// Access register state
+let regs = vm.get_registers();
+println!("Final R0: {}", regs[0]);
+```
+
+## Memory Layout
+
+Memory is a flat, byte-addressable space:
+
+```text
+0x0000: [........................................]
+        ↑                                        ↑
+     start                                  max_size
+                                          (default: 1MB)
+```
+
+- **Unallocated reads**: Return 0
+- **Out-of-bounds writes**: Return `VmError::MemoryOverflow`
+- **Dynamic expansion**: Memory grows automatically on writes
+- **Alignment**: No alignment requirements; any offset is valid

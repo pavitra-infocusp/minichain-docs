@@ -1,0 +1,366 @@
+---
+title: 'Blockchain'
+description: 'Main blockchain orchestration for minichain'
+---
+
+## Overview
+
+The `Blockchain` struct orchestrates all components of the minichain blockchain: consensus, storage, mempool, and execution. It provides high-level APIs for initializing the chain, submitting transactions, proposing blocks, and importing validated blocks.
+
+## Blockchain
+
+Main blockchain struct that coordinates all components.
+
+### Constructor
+
+<ParamField path="new" type="fn">
+  Create a new blockchain with the given storage and configuration.
+  
+  ```rust
+  pub fn new(storage: &'a Storage, config: BlockchainConfig) -> Self
+  ```
+  
+  <ParamField path="storage" type="&Storage" required>
+    Storage backend for persistent state
+  </ParamField>
+  
+  <ParamField path="config" type="BlockchainConfig" required>
+    Blockchain configuration including consensus and block limits
+  </ParamField>
+</ParamField>
+
+### Methods
+
+#### init_genesis
+
+<ParamField path="init_genesis" type="fn">
+  Initialize the blockchain with a genesis block.
+  
+  ```rust
+  pub fn init_genesis(&self, genesis: &Block) -> Result<()>
+  ```
+  
+  <ParamField path="genesis" type="&Block" required>
+    The genesis block to initialize the chain with
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<()>">
+    Returns `Ok(())` on success or `BlockchainError` on failure
+  </ResponseField>
+</ParamField>
+
+#### height
+
+<ParamField path="height" type="fn">
+  Get the current chain height.
+  
+  ```rust
+  pub fn height(&self) -> Result<u64>
+  ```
+  
+  <ResponseField name="Result" type="Result<u64>">
+    Returns the current block height (0 for genesis)
+  </ResponseField>
+</ParamField>
+
+#### get_latest_block
+
+<ParamField path="get_latest_block" type="fn">
+  Get the latest block in the chain.
+  
+  ```rust
+  pub fn get_latest_block(&self) -> Result<Block>
+  ```
+  
+  <ResponseField name="Result" type="Result<Block>">
+    Returns the most recent block or `BlockchainError::InvalidChainState`
+  </ResponseField>
+</ParamField>
+
+#### get_block
+
+<ParamField path="get_block" type="fn">
+  Get a block by its hash.
+  
+  ```rust
+  pub fn get_block(&self, hash: &Hash) -> Result<Option<Block>>
+  ```
+  
+  <ParamField path="hash" type="&Hash" required>
+    The hash of the block to retrieve
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<Option<Block>>">
+    Returns `Some(Block)` if found, `None` if not found
+  </ResponseField>
+</ParamField>
+
+#### get_block_by_height
+
+<ParamField path="get_block_by_height" type="fn">
+  Get a block by its height.
+  
+  ```rust
+  pub fn get_block_by_height(&self, height: u64) -> Result<Option<Block>>
+  ```
+  
+  <ParamField path="height" type="u64" required>
+    The height of the block to retrieve
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<Option<Block>>">
+    Returns `Some(Block)` if found, `None` if not found
+  </ResponseField>
+</ParamField>
+
+#### register_authority
+
+<ParamField path="register_authority" type="fn">
+  Register a public key for an authority.
+  
+  ```rust
+  pub fn register_authority(&mut self, address: Address, public_key: PublicKey)
+  ```
+  
+  <ParamField path="address" type="Address" required>
+    The address of the authority
+  </ParamField>
+  
+  <ParamField path="public_key" type="PublicKey" required>
+    The public key for signature verification
+  </ParamField>
+</ParamField>
+
+#### submit_transaction
+
+<ParamField path="submit_transaction" type="fn">
+  Submit a transaction to the mempool.
+  
+  ```rust
+  pub fn submit_transaction(&mut self, tx: Transaction) -> Result<()>
+  ```
+  
+  <ParamField path="tx" type="Transaction" required>
+    The signed transaction to submit
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<()>">
+    Returns `Ok(())` on success or validation error
+  </ResponseField>
+</ParamField>
+
+#### get_pending_transactions
+
+<ParamField path="get_pending_transactions" type="fn">
+  Get pending transactions from the mempool.
+  
+  ```rust
+  pub fn get_pending_transactions(&self, limit: usize) -> Vec<Transaction>
+  ```
+  
+  <ParamField path="limit" type="usize" required>
+    Maximum number of transactions to return
+  </ParamField>
+  
+  <ResponseField name="Result" type="Vec<Transaction>">
+    Returns up to `limit` pending transactions, ordered by gas price
+  </ResponseField>
+</ParamField>
+
+#### propose_block
+
+<ParamField path="propose_block" type="fn">
+  Propose a new block (for authorities).
+  
+  ```rust
+  pub fn propose_block(&mut self, proposer: &BlockProposer) -> Result<Block>
+  ```
+  
+  <ParamField path="proposer" type="&BlockProposer" required>
+    Block proposer with authority keypair
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<Block>">
+    Returns the proposed block or consensus error if not authority's turn
+  </ResponseField>
+</ParamField>
+
+#### validate_and_execute_block
+
+<ParamField path="validate_and_execute_block" type="fn">
+  Validate and execute a block.
+  
+  This performs:
+  1. Consensus validation (authority, signature, timestamp)
+  2. Block structure validation
+  3. Transaction execution
+  4. State root update
+  
+  ```rust
+  pub fn validate_and_execute_block(&self, block: &Block) -> Result<BlockExecutionResult>
+  ```
+  
+  <ParamField path="block" type="&Block" required>
+    The block to validate and execute
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<BlockExecutionResult>">
+    Returns execution results including receipts and gas used
+  </ResponseField>
+</ParamField>
+
+#### import_block
+
+<ParamField path="import_block" type="fn">
+  Import a block into the chain.
+  
+  This validates, executes, and stores the block, then updates the chain head and removes included transactions from the mempool.
+  
+  ```rust
+  pub fn import_block(&mut self, block: Block) -> Result<BlockExecutionResult>
+  ```
+  
+  <ParamField path="block" type="Block" required>
+    The block to import
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<BlockExecutionResult>">
+    Returns execution results on success
+  </ResponseField>
+</ParamField>
+
+#### stats
+
+<ParamField path="stats" type="fn">
+  Get blockchain statistics.
+  
+  ```rust
+  pub fn stats(&self) -> Result<BlockchainStats>
+  ```
+  
+  <ResponseField name="Result" type="Result<BlockchainStats>">
+    Returns current blockchain statistics
+  </ResponseField>
+</ParamField>
+
+## BlockchainConfig
+
+Configuration for the blockchain.
+
+```rust
+pub struct BlockchainConfig {
+    pub consensus: PoAConfig,
+    pub max_block_size: usize,
+}
+```
+
+<ParamField path="consensus" type="PoAConfig">
+  Proof of Authority consensus configuration
+</ParamField>
+
+<ParamField path="max_block_size" type="usize">
+  Maximum number of transactions per block (default: 1000)
+</ParamField>
+
+## BlockchainStats
+
+Statistics about the current blockchain state.
+
+```rust
+pub struct BlockchainStats {
+    pub height: u64,
+    pub latest_block_hash: Hash,
+    pub latest_timestamp: u64,
+    pub pending_transactions: usize,
+    pub authority_count: usize,
+}
+```
+
+<ResponseField name="height" type="u64">
+  Current chain height
+</ResponseField>
+
+<ResponseField name="latest_block_hash" type="Hash">
+  Hash of the latest block
+</ResponseField>
+
+<ResponseField name="latest_timestamp" type="u64">
+  Timestamp of the latest block
+</ResponseField>
+
+<ResponseField name="pending_transactions" type="usize">
+  Number of pending transactions in mempool
+</ResponseField>
+
+<ResponseField name="authority_count" type="usize">
+  Number of registered authorities
+</ResponseField>
+
+## BlockchainError
+
+Errors that can occur during blockchain operations.
+
+```rust
+pub enum BlockchainError {
+    Storage(StorageError),
+    Consensus(ConsensusError),
+    Validation(ValidationError),
+    Execution(ExecutionError),
+    Mempool(MempoolError),
+    MissingGenesis,
+    BlockNotFound(Hash),
+    InvalidChainState,
+}
+```
+
+## Usage Example
+
+```rust
+use minichain_chain::{Blockchain, BlockchainConfig};
+use minichain_consensus::{PoAConfig, BlockProposer};
+use minichain_core::{Keypair, Block};
+use minichain_storage::Storage;
+
+// Setup storage
+let storage = Storage::open("./blockchain_data").unwrap();
+
+// Configure blockchain with PoA
+let keypair = Keypair::generate();
+let config = BlockchainConfig {
+    consensus: PoAConfig::new(vec![keypair.address()], 5),
+    max_block_size: 1000,
+};
+
+// Create blockchain
+let mut blockchain = Blockchain::new(&storage, config);
+blockchain.register_authority(keypair.address(), keypair.public_key.clone());
+
+// Initialize with genesis
+let genesis = Block::genesis(keypair.address()).signed(&keypair);
+blockchain.init_genesis(&genesis).unwrap();
+
+// Submit a transaction
+let from = keypair.address();
+let to = Address::from_bytes([2u8; 20]);
+let tx = Transaction::transfer(from, to, 1000, 0, 1).signed(&keypair);
+blockchain.submit_transaction(tx).unwrap();
+
+// Propose a block
+let proposer = BlockProposer::new(keypair, config.consensus);
+let block = blockchain.propose_block(&proposer).unwrap();
+
+// Import the block
+let result = blockchain.import_block(block).unwrap();
+println!("Block imported with {} transactions", result.receipts.len());
+
+// Get stats
+let stats = blockchain.stats().unwrap();
+println!("Chain height: {}", stats.height);
+println!("Pending transactions: {}", stats.pending_transactions);
+```
+
+## See Also
+
+- [Mempool](/api/chain/mempool) - Transaction pool management
+- [Executor](/api/chain/executor) - Block execution engine
+- [Consensus](/api/consensus/poa) - Proof of Authority consensus

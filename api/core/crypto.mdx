@@ -1,0 +1,448 @@
+---
+title: Crypto
+description: Ed25519 cryptographic primitives for signing and verification
+---
+
+The `crypto` module provides Ed25519 cryptographic primitives for digital signatures and address derivation. It includes types for addresses, signatures, public keys, and keypairs.
+
+## Overview
+
+This module uses the Ed25519 signature scheme for transaction signing and verification. Addresses are derived from public keys using Blake3 hashing.
+
+## Types
+
+### AddressBytes
+
+```rust
+pub type AddressBytes = [u8; 20];
+```
+
+A type alias for a 20-byte array representing an address.
+
+### Address
+
+```rust
+pub struct Address(pub AddressBytes);
+```
+
+An address on the blockchain, derived from the first 20 bytes of a public key hash.
+
+#### Constants
+
+<ParamField path="ZERO" type="Address">
+  The zero address (all zeros).
+  
+  ```rust
+  pub const ZERO: Self = Self([0u8; 20]);
+  ```
+</ParamField>
+
+#### Methods
+
+<ResponseField name="from_bytes" type="fn(bytes: AddressBytes) -> Self">
+  Creates an address from raw bytes.
+  
+  ```rust
+  let bytes: [u8; 20] = [1; 20];
+  let address = Address::from_bytes(bytes);
+  ```
+</ResponseField>
+
+<ResponseField name="as_bytes" type="fn(&self) -> &AddressBytes">
+  Returns a reference to the underlying bytes.
+  
+  ```rust
+  let address = Address::ZERO;
+  let bytes: &[u8; 20] = address.as_bytes();
+  ```
+</ResponseField>
+
+<ResponseField name="to_hex" type="fn(&self) -> String">
+  Converts the address to a hexadecimal string with "0x" prefix.
+  
+  ```rust
+  let address = keypair.address();
+  let hex = address.to_hex();
+  // Returns: "0xf4a5e8c2b9d7f3a1e6c5b8d2f9a4e7c3b1d5f8a2"
+  ```
+</ResponseField>
+
+<ResponseField name="from_hex" type="fn(s: &str) -> Result<Self, CryptoError>">
+  Parses an address from a hexadecimal string (with or without "0x" prefix).
+  
+  ```rust
+  let address = Address::from_hex("0xf4a5e8c2b9d7f3a1e6c5b8d2f9a4e7c3b1d5f8a2")?;
+  // Also works without prefix:
+  let address = Address::from_hex("f4a5e8c2b9d7f3a1e6c5b8d2f9a4e7c3b1d5f8a2")?;
+  ```
+  
+  <ParamField path="s" type="&str">
+    Hexadecimal string (40 characters, optionally prefixed with "0x")
+  </ParamField>
+</ResponseField>
+
+#### Trait Implementations
+
+- **Clone, Copy, PartialEq, Eq, Hash, Default**: Standard derivations
+- **Serialize, Deserialize**: Serde support
+- **Display**: Formats as "0x" followed by hex
+- **Debug**: Formats as "Address(0x...)"
+- **AsRef**: Allows using Address as a byte slice
+
+### Signature
+
+```rust
+pub struct Signature(pub [u8; 64]);
+```
+
+A cryptographic Ed25519 signature (64 bytes).
+
+#### Methods
+
+<ResponseField name="from_bytes" type="fn(bytes: [u8; 64]) -> Self">
+  Creates a signature from raw bytes.
+</ResponseField>
+
+<ResponseField name="as_bytes" type="fn(&self) -> &[u8; 64]">
+  Returns a reference to the underlying bytes.
+</ResponseField>
+
+<ResponseField name="to_hex" type="fn(&self) -> String">
+  Converts the signature to a hexadecimal string.
+</ResponseField>
+
+#### Trait Implementations
+
+- **Clone, Copy, PartialEq, Eq, Default**: Standard derivations
+- **Serialize, Deserialize**: Custom serde implementation
+- **Display**: Formats as "0x" followed by hex
+- **Debug**: Formats as "Signature(...)" with first 16 hex characters
+
+### PublicKey
+
+```rust
+pub struct PublicKey(pub VerifyingKey);
+```
+
+A public key for signature verification (wraps `ed25519_dalek::VerifyingKey`).
+
+#### Methods
+
+<ResponseField name="to_address" type="fn(&self) -> Address">
+  Derives the address from this public key.
+  
+  The address is the first 20 bytes of the Blake3 hash of the public key.
+  
+  ```rust
+  let keypair = Keypair::generate();
+  let address = keypair.public_key.to_address();
+  ```
+</ResponseField>
+
+<ResponseField name="as_bytes" type="fn(&self) -> [u8; 32]">
+  Returns the raw bytes of the public key.
+</ResponseField>
+
+<ResponseField name="verify" type="fn(&self, message: &[u8], signature: &Signature) -> Result<(), CryptoError>">
+  Verifies a signature against this public key.
+  
+  ```rust
+  let keypair = Keypair::generate();
+  let message = b"hello world";
+  let signature = keypair.sign(message);
+  
+  keypair.public_key.verify(message, &signature)?;
+  ```
+  
+  <ParamField path="message" type="&[u8]">
+    The message that was signed
+  </ParamField>
+  
+  <ParamField path="signature" type="&Signature">
+    The signature to verify
+  </ParamField>
+</ResponseField>
+
+#### Trait Implementations
+
+- **Clone, PartialEq, Eq**: Standard derivations
+- **Serialize, Deserialize**: Custom serde implementation
+- **Debug**: Formats with first 8 bytes of key
+
+### Keypair
+
+```rust
+pub struct Keypair {
+    signing_key: SigningKey,
+    pub public_key: PublicKey,
+}
+```
+
+A keypair for signing and verification, containing both private and public keys.
+
+#### Methods
+
+<ResponseField name="generate" type="fn() -> Self">
+  Generates a new random keypair using a cryptographically secure random number generator.
+  
+  ```rust
+  use minichain_core::crypto::Keypair;
+  
+  let keypair = Keypair::generate();
+  println!("Address: {}", keypair.address());
+  ```
+</ResponseField>
+
+<ResponseField name="from_private_key" type="fn(bytes: &[u8; 32]) -> Result<Self, CryptoError>">
+  Creates a keypair from a 32-byte private key.
+  
+  ```rust
+  let private_key: [u8; 32] = /* ... */;
+  let keypair = Keypair::from_private_key(&private_key)?;
+  ```
+  
+  <ParamField path="bytes" type="&[u8; 32]">
+    The 32-byte private key
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="private_key" type="fn(&self) -> [u8; 32]">
+  Returns the private key bytes.
+  
+  **Warning**: Keep private keys secure and never expose them.
+  
+  ```rust
+  let keypair = Keypair::generate();
+  let private_key = keypair.private_key();
+  ```
+</ResponseField>
+
+<ResponseField name="address" type="fn(&self) -> Address">
+  Returns the address derived from the public key.
+  
+  ```rust
+  let keypair = Keypair::generate();
+  let address = keypair.address();
+  ```
+</ResponseField>
+
+<ResponseField name="sign" type="fn(&self, message: &[u8]) -> Signature">
+  Signs a message with the private key.
+  
+  ```rust
+  let keypair = Keypair::generate();
+  let message = b"transaction data";
+  let signature = keypair.sign(message);
+  ```
+  
+  <ParamField path="message" type="&[u8]">
+    The message to sign
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="sign_hash" type="fn(&self, hash: &Hash) -> Signature">
+  Signs a hash directly.
+  
+  ```rust
+  use minichain_core::hash::hash;
+  
+  let keypair = Keypair::generate();
+  let data_hash = hash(b"some data");
+  let signature = keypair.sign_hash(&data_hash);
+  ```
+  
+  <ParamField path="hash" type="&Hash">
+    The hash to sign
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="verify" type="fn(&self, message: &[u8], signature: &Signature) -> Result<(), CryptoError>">
+  Verifies a signature against this keypair's public key.
+  
+  ```rust
+  let keypair = Keypair::generate();
+  let message = b"hello";
+  let signature = keypair.sign(message);
+  
+  keypair.verify(message, &signature)?;
+  ```
+  
+  <ParamField path="message" type="&[u8]">
+    The message that was signed
+  </ParamField>
+  
+  <ParamField path="signature" type="&Signature">
+    The signature to verify
+  </ParamField>
+</ResponseField>
+
+#### Trait Implementations
+
+- **Debug**: Formats with the address only (doesn't expose private key)
+
+## Errors
+
+### CryptoError
+
+```rust
+pub enum CryptoError {
+    InvalidSignature,
+    InvalidPublicKey,
+    InvalidPrivateKey,
+    InvalidAddress,
+    VerificationFailed,
+}
+```
+
+Errors that can occur during cryptographic operations.
+
+<ParamField path="InvalidSignature" type="variant">
+  The signature format is invalid
+</ParamField>
+
+<ParamField path="InvalidPublicKey" type="variant">
+  The public key format is invalid
+</ParamField>
+
+<ParamField path="InvalidPrivateKey" type="variant">
+  The private key format is invalid
+</ParamField>
+
+<ParamField path="InvalidAddress" type="variant">
+  The address format is invalid
+</ParamField>
+
+<ParamField path="VerificationFailed" type="variant">
+  Signature verification failed (signature doesn't match message/key)
+</ParamField>
+
+## Usage Examples
+
+### Generate a Keypair and Sign
+
+```rust
+use minichain_core::crypto::Keypair;
+
+// Generate a new keypair
+let keypair = Keypair::generate();
+println!("Address: {}", keypair.address());
+
+// Sign a message
+let message = b"hello world";
+let signature = keypair.sign(message);
+
+// Verify the signature
+assert!(keypair.verify(message, &signature).is_ok());
+```
+
+### Address Derivation
+
+```rust
+use minichain_core::crypto::Keypair;
+
+// Create a keypair
+let keypair = Keypair::generate();
+
+// Get the address
+let address = keypair.address();
+println!("Address: {}", address.to_hex());
+
+// Address is deterministic from public key
+let address2 = keypair.public_key.to_address();
+assert_eq!(address, address2);
+```
+
+### Restore Keypair from Private Key
+
+```rust
+use minichain_core::crypto::Keypair;
+
+// Generate and save private key
+let keypair1 = Keypair::generate();
+let private_key = keypair1.private_key();
+
+// Later, restore from private key
+let keypair2 = Keypair::from_private_key(&private_key).unwrap();
+
+// Same address
+assert_eq!(keypair1.address(), keypair2.address());
+```
+
+### Transaction Signing Pattern
+
+```rust
+use minichain_core::crypto::Keypair;
+use minichain_core::hash::hash;
+
+// Create a transaction
+let tx_data = b"from:alice,to:bob,value:100";
+let tx_hash = hash(tx_data);
+
+// Sign the transaction hash
+let keypair = Keypair::generate();
+let signature = keypair.sign_hash(&tx_hash);
+
+// Verify signature
+assert!(keypair.public_key.verify(tx_hash.as_bytes(), &signature).is_ok());
+```
+
+### Signature Verification with Different Keys
+
+```rust
+use minichain_core::crypto::Keypair;
+
+let keypair1 = Keypair::generate();
+let keypair2 = Keypair::generate();
+
+let message = b"test message";
+let signature = keypair1.sign(message);
+
+// Verification succeeds with correct key
+assert!(keypair1.verify(message, &signature).is_ok());
+
+// Verification fails with wrong key
+assert!(keypair2.verify(message, &signature).is_err());
+```
+
+## Implementation Details
+
+### Ed25519 Properties
+
+- **Algorithm**: Twisted Edwards curve signature scheme
+- **Key Size**: 32 bytes (256 bits)
+- **Signature Size**: 64 bytes (512 bits)
+- **Security**: Equivalent to ~128-bit security level
+- **Performance**: Fast signature generation and verification
+
+### Address Derivation
+
+Addresses are derived as follows:
+
+1. Take the public key (32 bytes)
+2. Hash it with Blake3 to get 32 bytes
+3. Take the first 20 bytes as the address
+
+```rust
+pub fn to_address(&self) -> Address {
+    let hash = hash(self.0.as_bytes());
+    let mut addr = [0u8; 20];
+    addr.copy_from_slice(&hash.0[..20]);
+    Address(addr)
+}
+```
+
+This ensures:
+- Addresses are shorter than public keys (20 vs 32 bytes)
+- Collision resistance from Blake3
+- Deterministic derivation from public key
+
+### Security Considerations
+
+- **Private Key Storage**: Never log or expose private keys
+- **Random Number Generation**: Uses OS-provided cryptographically secure RNG
+- **Signature Determinism**: Same message always produces same signature with same key
+- **Verification**: Always verify signatures before trusting signed data
+
+## Source Location
+
+Defined in `crates/core/src/crypto.rs`

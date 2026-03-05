@@ -1,0 +1,409 @@
+---
+title: Tracer
+description: Execution tracing and debugging tools for the VM
+---
+
+The tracer module provides debugging and execution analysis capabilities for VM programs.
+
+## TraceStep Struct
+
+Represents a single step in the execution trace.
+
+```rust
+#[derive(Debug, Clone)]
+pub struct TraceStep {
+    pub pc: usize,
+    pub opcode: Opcode,
+    pub gas_before: u64,
+    pub gas_after: u64,
+    pub registers: [u64; 16],
+}
+```
+
+### Fields
+
+<ParamField path="pc" type="usize">
+  Program counter at this step (bytecode offset)
+</ParamField>
+
+<ParamField path="opcode" type="Opcode">
+  Opcode executed at this step
+</ParamField>
+
+<ParamField path="gas_before" type="u64">
+  Gas remaining before executing this instruction
+</ParamField>
+
+<ParamField path="gas_after" type="u64">
+  Gas remaining after executing this instruction
+</ParamField>
+
+<ParamField path="registers" type="[u64; 16]">
+  Snapshot of all register values after execution
+</ParamField>
+
+## Tracer Struct
+
+Records execution steps for debugging and analysis.
+
+```rust
+pub struct Tracer {
+    steps: Vec<TraceStep>,
+    enabled: bool,
+}
+```
+
+<ParamField path="steps" type="Vec<TraceStep>">
+  Collected trace steps
+</ParamField>
+
+<ParamField path="enabled" type="bool">
+  Whether tracing is active
+</ParamField>
+
+### Methods
+
+#### new
+
+Create a new tracer.
+
+```rust
+pub fn new(enabled: bool) -> Self
+```
+
+<ParamField path="enabled" type="bool" required>
+  Whether to enable tracing. If false, no trace steps are recorded.
+</ParamField>
+
+<ResponseField name="tracer" type="Tracer">
+  New tracer instance
+</ResponseField>
+
+**Example**:
+```rust
+use minichain_vm::Tracer;
+
+// Create enabled tracer
+let mut tracer = Tracer::new(true);
+
+// Create disabled tracer (no overhead)
+let mut noop_tracer = Tracer::new(false);
+```
+
+#### record
+
+Record a trace step.
+
+```rust
+pub fn record(&mut self, step: TraceStep)
+```
+
+<ParamField path="step" type="TraceStep" required>
+  Trace step to record
+</ParamField>
+
+**Note**: If tracing is disabled, this operation is a no-op.
+
+**Example**:
+```rust
+use minichain_vm::{Tracer, TraceStep, Opcode};
+
+let mut tracer = Tracer::new(true);
+
+let step = TraceStep {
+    pc: 0,
+    opcode: Opcode::ADD,
+    gas_before: 1000,
+    gas_after: 998,
+    registers: [0; 16],
+};
+
+tracer.record(step);
+```
+
+#### steps
+
+Get all recorded trace steps.
+
+```rust
+pub fn steps(&self) -> &[TraceStep]
+```
+
+<ResponseField name="steps" type="&[TraceStep]">
+  Slice of all recorded trace steps in order of execution
+</ResponseField>
+
+**Example**:
+```rust
+let steps = tracer.steps();
+println!("Recorded {} steps", steps.len());
+
+for step in steps {
+    println!("PC: {:04X}, Opcode: {:?}", step.pc, step.opcode);
+}
+```
+
+#### print_trace
+
+Print a human-readable trace to stdout.
+
+```rust
+pub fn print_trace(&self)
+```
+
+**Output Format**:
+```text
+   0: PC=0000 ADD gas=998 R0=0 R1=5 R2=3
+   1: PC=0003 MUL gas=995 R0=8 R1=5 R2=2
+   2: PC=0006 HALT gas=995 R0=16 R1=5 R2=2
+```
+
+**Example**:
+```rust
+let tracer = Tracer::new(true);
+// ... execute program ...
+tracer.print_trace();
+```
+
+## Usage Examples
+
+### Basic Tracing
+
+```rust
+use minichain_vm::{Vm, Tracer, TraceStep, Opcode};
+use minichain_core::Address;
+
+// Simple ADD program
+let bytecode = vec![
+    0x70, 0x10, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // LOADI R1, 5
+    0x70, 0x20, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // LOADI R2, 3
+    0x10, 0x01, 0x20,  // ADD R0, R1, R2
+    0x00,              // HALT
+];
+
+let mut vm = Vm::new(bytecode, 10000, Address::zero(), Address::zero(), 0);
+let mut tracer = Tracer::new(true);
+
+// In a real implementation, you'd integrate tracing into the VM
+// This is a conceptual example
+let result = vm.run()?;
+
+tracer.print_trace();
+```
+
+### Analyzing Execution
+
+```rust
+use minichain_vm::{Tracer, TraceStep};
+
+let tracer = Tracer::new(true);
+// ... execute program with tracing ...
+
+// Analyze the trace
+let steps = tracer.steps();
+
+// Find expensive operations
+for (i, step) in steps.iter().enumerate() {
+    let gas_used = step.gas_before - step.gas_after;
+    if gas_used > 100 {
+        println!("Step {}: {:?} used {} gas", i, step.opcode, gas_used);
+    }
+}
+
+// Total gas consumption
+if let (Some(first), Some(last)) = (steps.first(), steps.last()) {
+    let total_gas = first.gas_before - last.gas_after;
+    println!("Total gas used: {}", total_gas);
+}
+```
+
+### Debugging Failed Execution
+
+```rust
+use minichain_vm::{Vm, Tracer, VmError};
+use minichain_core::Address;
+
+let bytecode = vec![/* ... */];
+let mut vm = Vm::new(bytecode, 10000, Address::zero(), Address::zero(), 0);
+let mut tracer = Tracer::new(true);
+
+match vm.run() {
+    Ok(result) => {
+        println!("Success!");
+    }
+    Err(e) => {
+        eprintln!("Error: {:?}", e);
+        eprintln!("\nExecution trace:");
+        tracer.print_trace();
+        
+        // Show state at failure
+        if let Some(last_step) = tracer.steps().last() {
+            eprintln!("\nFailed at PC: 0x{:04X}", last_step.pc);
+            eprintln!("Opcode: {:?}", last_step.opcode);
+            eprintln!("Registers: {:?}", last_step.registers);
+        }
+    }
+}
+```
+
+### Performance Analysis
+
+```rust
+use minichain_vm::{Tracer, Opcode};
+use std::collections::HashMap;
+
+let tracer = Tracer::new(true);
+// ... execute program ...
+
+// Count opcode usage
+let mut opcode_counts: HashMap<Opcode, usize> = HashMap::new();
+for step in tracer.steps() {
+    *opcode_counts.entry(step.opcode).or_insert(0) += 1;
+}
+
+println!("Opcode frequency:");
+for (opcode, count) in opcode_counts {
+    println!("  {:?}: {} times", opcode, count);
+}
+```
+
+### Gas Usage Profiling
+
+```rust
+use minichain_vm::{Tracer, Opcode};
+use std::collections::HashMap;
+
+let tracer = Tracer::new(true);
+// ... execute program ...
+
+// Track gas usage by opcode
+let mut gas_by_opcode: HashMap<Opcode, u64> = HashMap::new();
+for step in tracer.steps() {
+    let gas_used = step.gas_before.saturating_sub(step.gas_after);
+    *gas_by_opcode.entry(step.opcode).or_insert(0) += gas_used;
+}
+
+println!("Gas usage by opcode:");
+for (opcode, total_gas) in gas_by_opcode {
+    println!("  {:?}: {} gas", opcode, total_gas);
+}
+```
+
+### Conditional Tracing
+
+```rust
+use minichain_vm::Tracer;
+
+// Only trace in debug mode
+let tracer = if cfg!(debug_assertions) {
+    Tracer::new(true)
+} else {
+    Tracer::new(false)  // No overhead in release builds
+};
+```
+
+### Jump Analysis
+
+```rust
+use minichain_vm::{Tracer, Opcode};
+
+let tracer = Tracer::new(true);
+// ... execute program ...
+
+// Find all jumps and their targets
+println!("Jump analysis:");
+let steps = tracer.steps();
+for (i, step) in steps.iter().enumerate() {
+    match step.opcode {
+        Opcode::JUMP | Opcode::JUMPI => {
+            if let Some(next_step) = steps.get(i + 1) {
+                println!(
+                    "  Jump from 0x{:04X} to 0x{:04X}",
+                    step.pc, next_step.pc
+                );
+            }
+        }
+        _ => {}
+    }
+}
+```
+
+### Register State Tracking
+
+```rust
+use minichain_vm::Tracer;
+
+let tracer = Tracer::new(true);
+// ... execute program ...
+
+// Track R0 value changes
+println!("R0 value over time:");
+for (i, step) in tracer.steps().iter().enumerate() {
+    println!("  Step {}: R0 = {}", i, step.registers[0]);
+}
+
+// Find when a specific register was modified
+let target_reg = 5;
+for (i, step) in tracer.steps().iter().enumerate() {
+    if i > 0 {
+        let prev = &tracer.steps()[i - 1];
+        if step.registers[target_reg] != prev.registers[target_reg] {
+            println!(
+                "R{} modified at step {}: {} -> {}",
+                target_reg, i,
+                prev.registers[target_reg],
+                step.registers[target_reg]
+            );
+        }
+    }
+}
+```
+
+## Integration with VM
+
+While the current VM implementation doesn't include built-in tracing hooks, you can extend it:
+
+```rust
+use minichain_vm::{Vm, Tracer, TraceStep};
+
+pub struct TracingVm {
+    vm: Vm,
+    tracer: Tracer,
+}
+
+impl TracingVm {
+    pub fn new(vm: Vm, enabled: bool) -> Self {
+        Self {
+            vm,
+            tracer: Tracer::new(enabled),
+        }
+    }
+
+    // Custom run method that records trace steps
+    // This would require VM internals to be exposed
+    pub fn run_traced(&mut self) -> Result<ExecutionResult, VmError> {
+        // Implementation would hook into VM step execution
+        // and call tracer.record() after each instruction
+        self.vm.run()
+    }
+
+    pub fn tracer(&self) -> &Tracer {
+        &self.tracer
+    }
+}
+```
+
+## Best Practices
+
+1. **Disable in production**: Set `enabled: false` for production workloads to avoid overhead
+2. **Memory management**: Traces can grow large; clear periodically for long-running programs
+3. **Selective tracing**: Only enable for debugging specific issues
+4. **Analysis tools**: Build custom analysis tools on top of trace data
+5. **Gas profiling**: Use traces to identify gas optimization opportunities
+
+## Performance Considerations
+
+- **Disabled tracer**: Zero overhead, all operations become no-ops
+- **Enabled tracer**: Memory cost grows linearly with execution steps
+- **Typical overhead**: ~50-100 bytes per trace step
+- **Large programs**: Consider sampling (record every Nth step) for very long executions

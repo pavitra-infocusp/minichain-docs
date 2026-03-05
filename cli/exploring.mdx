@@ -1,0 +1,403 @@
+---
+title: Exploring the Blockchain
+description: Query and browse blockchain state with exploration commands
+---
+
+Minichain provides several commands for exploring blockchain state and history. These allow you to inspect blocks, transactions, and account data.
+
+## Available Commands
+
+While Minichain doesn't have a dedicated `explore` subcommand implementation, you can use these commands to browse the chain:
+
+<CardGroup cols={2}>
+  <Card title="block list" icon="list" href="#list-blocks">
+    Browse recent blocks
+  </Card>
+  <Card title="block info" icon="info" href="#block-details">
+    View block details and transactions
+  </Card>
+  <Card title="account info" icon="user" href="#account-state">
+    Inspect account state and balances
+  </Card>
+  <Card title="account balance" icon="wallet" href="#check-balances">
+    Query account balances
+  </Card>
+</CardGroup>
+
+## List Blocks
+
+Browse the blockchain from most recent to oldest.
+
+```bash
+minichain block list [--count <N>]
+```
+
+**Example:**
+
+```bash
+cargo run --release -- block list --count 20
+```
+
+**Output:**
+```
+Recent Blocks:
+
+  #19 0x9f3a6c2e8d5b... (4 txs)
+  #18 0x7d4b8f2a5c9e... (2 txs)
+  #17 0x5c1e9f3a6d8b... (1 txs)
+  #16 0x3a8d5f2c9e1b... (3 txs)
+  #15 0x1f7c4e9a2d6b... (0 txs)
+  ...
+  #0  0x8e5d2f9a1c6b... (0 txs)
+```
+
+This provides a quick overview of:
+- **Block height** - Sequential block number
+- **Block hash** - Truncated Blake3 hash
+- **Transaction count** - Number of transactions in the block
+
+<Info>
+Empty blocks (0 txs) can occur when authorities produce blocks without pending transactions. They still advance the chain height and timestamp.
+</Info>
+
+## Block Details
+
+View comprehensive information about a specific block.
+
+```bash
+minichain block info <HEIGHT_OR_HASH>
+```
+
+### Query by Height
+
+```bash
+cargo run --release -- block info 15
+```
+
+**Output:**
+```
+Block Information:
+
+  Height:       15
+  Hash:         0x1f7c4e9a2d6b3f8c5e1a7d9f2c4b8e6a...
+  Parent Hash:  0x3a8d5f2c9e1b4f7a6c9e2d5f8a1c4e7b...
+  State Root:   0x5c1e9f3a6d8b2f4a7c9e2d5f8a1c4e7b...
+  Timestamp:    1709740125
+  Transactions: 0
+```
+
+### Query by Hash
+
+```bash
+minichain block info 0x1f7c4e9a2d6b3f8c5e1a7d9f2c4b8e6a...
+```
+
+Returns the same information. The CLI automatically detects whether you provided a height (integer) or hash (hex string).
+
+### Block with Transactions
+
+For blocks containing transactions:
+
+```bash
+minichain block info 14
+```
+
+**Output:**
+```
+Block Information:
+
+  Height:       14
+  Hash:         0x3a8d5f2c9e1b4f7a6c9e2d5f8a1c4e7b...
+  Parent Hash:  0x5c1e9f3a6d8b2f4a7c9e2d5f8a1c4e7b...
+  State Root:   0x7d4b8f2a5c9e1b3f6a8d2c5e9f1a4b7c...
+  Timestamp:    1709740120
+  Transactions: 3
+
+Transactions:
+
+  1. 0x9f3a6c2e8d5b...
+  2. 0x7d4b8f2a5c9e...
+  3. 0x5c1e9f3a6d8b...
+```
+
+Each transaction is listed with its hash (truncated).
+
+<Note>
+Currently, Minichain doesn't provide a `tx info` command to view individual transaction details. To inspect a transaction, you need to examine the block that contains it.
+</Note>
+
+## Account State
+
+Inspect detailed account information including balance, nonce, and contract code.
+
+```bash
+minichain account info <ADDRESS>
+```
+
+### Regular Account
+
+```bash
+minichain account info 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+```
+
+**Output:**
+```
+Account Information:
+
+  Address:      0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  Balance:      28700
+  Nonce:        5
+  Is Contract:  No
+```
+
+This shows:
+- **Balance** - Current token balance
+- **Nonce** - Number of transactions sent (important for transaction ordering)
+- **Is Contract** - Whether this account contains code
+
+### Contract Account
+
+```bash
+minichain account info 0xa7b3c9e5d1f4a8c2b6e9d2f5a8c1e4b7
+```
+
+**Output:**
+```
+Account Information:
+
+  Address:      0xa7b3c9e5d1f4a8c2b6e9d2f5a8c1e4b7
+  Balance:      150
+  Nonce:        0
+  Is Contract:  Yes
+  Code Hash:    0x8f2a5c9e1d4b7f3a6c9e2d5f8a1c4e7b...
+```
+
+Contract accounts include:
+- **Code Hash** - Blake3 hash of the contract bytecode
+- **Balance** - Contracts can hold tokens
+- **Nonce** - Usually 0 (contracts don't send transactions directly)
+
+<Info>
+Contract storage is not visible via CLI commands. To inspect contract storage values, you need to call the contract with code that reads and returns storage slots.
+</Info>
+
+## Check Balances
+
+Quickly check an account's balance without full details.
+
+```bash
+minichain account balance <ADDRESS>
+```
+
+**Example:**
+
+```bash
+minichain account balance 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+```
+
+**Output:**
+```
+  Address: 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  Balance: 28700
+```
+
+This is useful for quickly verifying token balances during development and testing.
+
+## Exploration Workflow
+
+Here's a typical exploration session:
+
+```bash
+# 1. See the current chain height and recent activity
+minichain block list
+# Output:
+#   #15 0x1f7c4e9a2d6b... (0 txs)
+#   #14 0x3a8d5f2c9e1b... (3 txs)
+#   #13 0x5c1e9f3a6d8b... (1 txs)
+
+# 2. Examine an interesting block (one with transactions)
+minichain block info 14
+# Output:
+#   Transactions: 3
+#   1. 0x9f3a6c2e8d5b...
+#   2. 0x7d4b8f2a5c9e...
+#   3. 0x5c1e9f3a6d8b...
+
+# 3. Check account states affected by those transactions
+minichain account info 0x3f8c2a6e9b5d1f4a...
+# Output:
+#   Balance: 28700
+#   Nonce: 5
+
+minichain account info 0x8d2c5e9f1a4b7c3d...
+# Output:
+#   Balance: 150
+#   Nonce: 0
+
+# 4. Verify genesis block
+minichain block info 0
+# Output:
+#   Height: 0
+#   Parent Hash: 0x0000000000000000... (all zeros)
+#   Transactions: 0
+```
+
+## Understanding State Root
+
+The state root in each block is a merkle root of all account states:
+
+```
+state_root = merkle_root(all account states at this height)
+```
+
+This allows efficient verification that an account state is correct for a given block height.
+
+**Example:**
+
+```bash
+minichain block info 10
+# Output:
+#   State Root: 0x7d4b8f2a5c9e1b3f...
+
+minichain block info 11
+# Output:
+#   State Root: 0x9f3a6c2e8d5b7f1a... (different)
+```
+
+The state root changes whenever:
+- Account balances change (transfers)
+- Account nonces increment (transactions)
+- Contract storage is modified (SSTORE)
+- New contracts are deployed
+
+<Info>
+State roots enable light client verification in future P2P implementations. Clients can verify account states without storing the full blockchain.
+</Info>
+
+## Genesis Block
+
+The genesis block (block 0) has special properties:
+
+```bash
+minichain block info 0
+```
+
+**Output:**
+```
+Block Information:
+
+  Height:       0
+  Hash:         0x8e5d2f9a1c6b3f7e4d8a5c2e9f1b4a6c...
+  Parent Hash:  0x0000000000000000000000000000000000000000...
+  State Root:   0x1f7c4e9a2d6b3f8c5e1a7d9f2c4b8e6a...
+  Timestamp:    1709740100
+  Transactions: 0
+```
+
+Note:
+- **Parent Hash** - All zeros (no previous block)
+- **Height** - Always 0
+- **Transactions** - Empty (no transactions before genesis)
+
+The genesis block establishes:
+- Initial authority set
+- Starting timestamp
+- Empty state (all accounts start with zero balance)
+
+## Chain Continuity
+
+You can verify chain integrity by following parent hashes:
+
+```bash
+# Get block 15
+minichain block info 15
+# Output:
+#   Hash:        0x1f7c4e9a2d6b...
+#   Parent Hash: 0x3a8d5f2c9e1b...
+
+# Verify parent hash matches block 14
+minichain block info 14
+# Output:
+#   Hash:        0x3a8d5f2c9e1b... (matches!)
+#   Parent Hash: 0x5c1e9f3a6d8b...
+
+# Follow the chain back
+minichain block info 13
+# Output:
+#   Hash:        0x5c1e9f3a6d8b... (matches!)
+```
+
+This forms an immutable chain:
+
+```
+Genesis(0) → Block(1) → Block(2) → ... → Block(15)
+```
+
+Each block cryptographically links to its predecessor via the parent hash.
+
+## Account List
+
+List all locally saved keypairs:
+
+```bash
+minichain account list
+```
+
+**Output:**
+```
+Saved Keypairs:
+
+  authority_0.json: 0xf4a5e8c2b9d7f3a1e6b8c4d9f2a5e8c1
+  alice.json:       0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+  bob.json:         0x8d2c5e9f1a4b7c3d6e9f2a5c8b1d4e7f
+```
+
+You can then inspect each account:
+
+```bash
+minichain account info 0xf4a5e8c2b9d7f3a1e6b8c4d9f2a5e8c1
+minichain account info 0x3f8c2a6e9b5d1f4a7c9e2b8d5f3a1c6e
+minichain account info 0x8d2c5e9f1a4b7c3d6e9f2a5c8b1d4e7f
+```
+
+## Limitations
+
+Current exploration capabilities are limited compared to full block explorers:
+
+- ❌ No transaction details command
+- ❌ No contract storage inspection
+- ❌ No transaction history by account
+- ❌ No search functionality
+- ❌ No web UI
+
+<Note>
+These features could be added in future versions. For now, use the available commands to piece together blockchain state manually.
+</Note>
+
+## Future Enhancements
+
+Possible exploration improvements:
+
+1. **Transaction indexing** - Query transactions by hash
+2. **Account history** - List all transactions for an account
+3. **Storage inspection** - View contract storage slots
+4. **Event logs** - Emit and query events from contracts
+5. **Web block explorer** - Browser-based UI
+6. **JSON-RPC API** - Remote blockchain queries
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/core-concepts/architecture">
+    Understand the underlying architecture
+  </Card>
+  <Card title="Virtual Machine" icon="microchip" href="/vm/overview">
+    Learn how transactions execute
+  </Card>
+  <Card title="Examples" icon="code" href="/smart-contracts/examples">
+    Try example contracts and workflows
+  </Card>
+  <Card title="API Reference" icon="file-code" href="/api/core/hash">
+    Explore the Rust API
+  </Card>
+</CardGroup>

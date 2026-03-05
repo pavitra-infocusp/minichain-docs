@@ -1,0 +1,73 @@
+---
+title: "Minichain"
+description: "Learn blockchain internals by building one from scratch in Rust"
+---
+
+<Note>
+  Minichain is an educational blockchain implementation designed for learning. It features a register-based VM, custom assembly language, and Proof of Authority consensus.
+</Note>
+
+## What is Minichain?
+
+Minichain is a complete, single-node, account-based blockchain built from scratch in Rust. It's designed as a learning project to understand blockchain internals by implementing every component yourself.
+
+### Key Features
+
+<CardGroup cols={2}>
+  <Card title="Register-based VM" icon="microchip">
+    16 registers with 40+ opcodes and gas metering
+  </Card>
+  <Card title="Custom Assembly" icon="code">
+    Human-readable assembly language that compiles to bytecode
+  </Card>
+  <Card title="Smart Contracts" icon="file-contract">
+    Deploy and execute bytecode contracts with storage
+  </Card>
+  <Card title="Proof of Authority" icon="shield-check">
+    Round-robin block production with Ed25519 signatures
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+Get up and running with Minichain in minutes.
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Rust and build Minichain from source
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Initialize a blockchain and run your first contract
+  </Card>
+</CardGroup>
+
+## Core Components
+
+<CardGroup cols={3}>
+  <Card title="Architecture" icon="sitemap" href="/core-concepts/architecture">
+    Understand the modular crate structure
+  </Card>
+  <Card title="Virtual Machine" icon="server" href="/vm/overview">
+    Explore the register-based VM architecture
+  </Card>
+  <Card title="Smart Contracts" icon="scroll" href="/smart-contracts/assembly-language">
+    Write contracts in assembly language
+  </Card>
+</CardGroup>
+
+## Explore the Documentation
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/core-concepts/architecture">
+    Learn about accounts, transactions, blocks, and consensus
+  </Card>
+  <Card title="CLI Usage" icon="terminal" href="/cli/overview">
+    Master the command-line interface
+  </Card>
+  <Card title="Complete Workflow" icon="list-check" href="/guides/complete-workflow">
+    Follow an end-to-end example
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/core/hash">
+    Explore the Rust API documentation
+  </Card>
+</CardGroup>

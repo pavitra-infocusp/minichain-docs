@@ -1,0 +1,225 @@
+---
+title: Hash
+description: Blake3 hashing utilities for the blockchain
+---
+
+The `hash` module provides Blake3 hashing utilities used throughout the blockchain for cryptographic operations. It includes the core `Hash` type and functions for hashing arbitrary data.
+
+## Overview
+
+Blake3 is a cryptographically secure hash function that produces 256-bit (32-byte) hashes. This module wraps Blake3 with convenience types and methods for blockchain operations.
+
+## Types
+
+### H256
+
+```rust
+pub type H256 = [u8; 32];
+```
+
+A type alias for a 32-byte array representing a 256-bit hash.
+
+### Hash
+
+```rust
+pub struct Hash(pub H256);
+```
+
+A wrapper type for `H256` with Display and Debug formatting, as well as serialization support.
+
+#### Constants
+
+<ParamField path="ZERO" type="Hash">
+  The zero hash (all zeros).
+  
+  ```rust
+  pub const ZERO: Self = Self([0u8; 32]);
+  ```
+</ParamField>
+
+#### Methods
+
+<ResponseField name="from_bytes" type="fn(bytes: H256) -> Self">
+  Creates a new Hash from raw bytes.
+  
+  ```rust
+  let bytes: [u8; 32] = [0; 32];
+  let hash = Hash::from_bytes(bytes);
+  ```
+</ResponseField>
+
+<ResponseField name="as_bytes" type="fn(&self) -> &H256">
+  Returns a reference to the underlying bytes.
+  
+  ```rust
+  let hash = Hash::ZERO;
+  let bytes: &[u8; 32] = hash.as_bytes();
+  ```
+</ResponseField>
+
+<ResponseField name="to_hex" type="fn(&self) -> String">
+  Converts the hash to a hexadecimal string.
+  
+  ```rust
+  let hash = hash(b"hello");
+  let hex_string = hash.to_hex();
+  // Returns: "ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f"
+  ```
+</ResponseField>
+
+<ResponseField name="from_hex" type="fn(s: &str) -> Result<Self, hex::FromHexError>">
+  Parses a Hash from a hexadecimal string.
+  
+  ```rust
+  let hash = Hash::from_hex("ea8f163db38682925e4491c5e58d4bb3506ef8c14eb78a86e908c5624a67200f")?;
+  ```
+  
+  <ParamField path="s" type="&str">
+    Hexadecimal string (64 characters)
+  </ParamField>
+  
+  Returns an error if the string is not valid hex or not exactly 32 bytes.
+</ResponseField>
+
+#### Trait Implementations
+
+- **Clone, Copy, PartialEq, Eq, Hash, Default**: Standard derivations
+- **Serialize, Deserialize**: Serde support for JSON/binary serialization
+- **Display**: Formats as "0x" followed by the full hex string
+- **Debug**: Formats as "Hash(0x" followed by the first 8 hex characters
+- **From** and **Into**: Conversions to/from raw bytes
+- **AsRef**: Allows using Hash as a byte slice
+
+## Functions
+
+### hash
+
+```rust
+pub fn hash(data: &[u8]) -> Hash
+```
+
+Hashes arbitrary data using Blake3.
+
+<ParamField path="data" type="&[u8]">
+  The data to hash
+</ParamField>
+
+<ResponseField name="returns" type="Hash">
+  The Blake3 hash of the input data
+</ResponseField>
+
+#### Example
+
+```rust
+use minichain_core::hash::hash;
+
+let data = b"hello world";
+let h = hash(data);
+println!("Hash: {}", h);
+```
+
+### hash_concat
+
+```rust
+pub fn hash_concat(parts: &[&[u8]]) -> Hash
+```
+
+Hashes multiple pieces of data by concatenating them. This is more efficient than manually concatenating before hashing.
+
+<ParamField path="parts" type="&[&[u8]]">
+  An array of byte slices to concatenate and hash
+</ParamField>
+
+<ResponseField name="returns" type="Hash">
+  The Blake3 hash of the concatenated data
+</ResponseField>
+
+#### Example
+
+```rust
+use minichain_core::hash::{hash, hash_concat};
+
+let h1 = hash_concat(&[b"hello", b"world"]);
+let h2 = hash(b"helloworld");
+assert_eq!(h1, h2);
+```
+
+## Usage Examples
+
+### Basic Hashing
+
+```rust
+use minichain_core::hash::{hash, Hash};
+
+// Hash some data
+let data = b"transaction data";
+let tx_hash = hash(data);
+
+// Convert to hex for display
+println!("Transaction hash: {}", tx_hash.to_hex());
+
+// Compare hashes
+let h1 = hash(b"data1");
+let h2 = hash(b"data2");
+assert_ne!(h1, h2);
+```
+
+### Hex String Conversion
+
+```rust
+use minichain_core::hash::{hash, Hash};
+
+// Create a hash
+let original = hash(b"test data");
+
+// Convert to hex string
+let hex_str = original.to_hex();
+
+// Parse back from hex
+let parsed = Hash::from_hex(&hex_str).unwrap();
+assert_eq!(original, parsed);
+```
+
+### Hashing Multiple Parts
+
+```rust
+use minichain_core::hash::hash_concat;
+
+// Hash sender address and nonce together
+let sender = [1u8; 20];
+let nonce = 42u64.to_le_bytes();
+
+let combined_hash = hash_concat(&[&sender, &nonce]);
+```
+
+### Using the Zero Hash
+
+```rust
+use minichain_core::hash::Hash;
+
+// Useful as a default or sentinel value
+let empty_merkle_root = Hash::ZERO;
+
+if merkle_root == Hash::ZERO {
+    println!("No transactions in block");
+}
+```
+
+## Implementation Details
+
+### Blake3 Properties
+
+- **Speed**: Blake3 is one of the fastest cryptographic hash functions
+- **Security**: 256-bit output provides strong collision resistance
+- **Parallelism**: Blake3 can utilize multiple CPU cores for large inputs
+- **Determinism**: Same input always produces same output
+
+### Performance Considerations
+
+- Hashing is a CPU-bound operation
+- For large amounts of data, consider using `hash_concat` instead of allocating intermediate buffers
+- Blake3 is significantly faster than SHA-256 while maintaining equivalent security
+
+## Source Location
+
+Defined in `crates/core/src/hash.rs`

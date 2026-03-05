@@ -1,0 +1,619 @@
+---
+title: Accounts & Transactions
+description: Understanding Minichain's account-based model, transaction types, and signing
+---
+
+Minichain uses an **account-based model** similar to Ethereum, where accounts have balances and nonces. This differs from Bitcoin's UTXO model.
+
+## Account Model
+
+### Account Structure
+
+Every account in Minichain is represented by the `Account` struct:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Account {
+    /// Transaction count / sequence number.
+    pub nonce: u64,
+    /// Account balance in the native token.
+    pub balance: u64,
+    /// Hash of the contract bytecode (None for EOAs).
+    pub code_hash: Option<Hash>,
+    /// Root hash of the account's storage trie.
+    pub storage_root: Hash,
+}
+```
+
+**Field Descriptions:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `nonce` | `u64` | Transaction count, prevents replay attacks |
+| `balance` | `u64` | Token balance in smallest unit |
+| `code_hash` | `Option<Hash>` | Blake3 hash of contract bytecode (None for EOAs) |
+| `storage_root` | `Hash` | Merkle root of account's storage trie |
+
+### Account Types
+
+Minichain supports two types of accounts:
+
+#### 1. Externally Owned Accounts (EOA)
+
+User accounts controlled by private keys.
+
+```rust
+// Create a new EOA with initial balance
+let account = Account::new_user(1000);
+
+assert_eq!(account.nonce, 0);
+assert_eq!(account.balance, 1000);
+assert_eq!(account.code_hash, None);  // No contract code
+assert!(account.is_eoa());
+```
+
+**Characteristics:**
+- No associated bytecode (`code_hash = None`)
+- Can initiate transactions
+- Controlled by Ed25519 keypair
+- Can send value and deploy contracts
+
+#### 2. Contract Accounts
+
+Accounts with associated smart contract bytecode.
+
+```rust
+// Create a new contract account
+let code_hash = hash(b"contract bytecode");
+let account = Account::new_contract(code_hash);
+
+assert_eq!(account.nonce, 0);
+assert_eq!(account.balance, 0);
+assert_eq!(account.code_hash, Some(code_hash));
+assert!(account.is_contract());
+```
+
+**Characteristics:**
+- Has bytecode (`code_hash = Some(hash)`)
+- Cannot initiate transactions (must be called)
+- Has persistent storage accessible via SLOAD/SSTORE
+- Can hold balance like EOAs
+
+<Note>
+  Contract accounts increment their nonce when they deploy other contracts (via CREATE opcode, not yet implemented in Minichain).
+</Note>
+
+### Account Operations
+
+The `Account` struct provides several utility methods:
+
+```rust
+// Balance operations
+account.credit(100);         // Add balance
+account.debit(50);           // Subtract balance (returns false if insufficient)
+account.has_balance(200);    // Check if balance >= amount
+
+// Nonce operations
+account.increment_nonce();   // Increment transaction count
+
+// Type checking
+account.is_eoa();            // Check if externally owned
+account.is_contract();       // Check if contract
+```
+
+### Nonce Tracking
+
+Nonces prevent replay attacks and enforce transaction ordering:
+
+```rust
+// Account starts with nonce 0
+let mut account = Account::new_user(1000);
+assert_eq!(account.nonce, 0);
+
+// First transaction must have nonce 0
+let tx1 = Transaction::transfer(from, to, 100, 0, 1);
+
+// After execution, increment nonce
+account.increment_nonce();
+assert_eq!(account.nonce, 1);
+
+// Next transaction must have nonce 1
+let tx2 = Transaction::transfer(from, to, 100, 1, 1);
+```
+
+**Nonce Rules:**
+
+<Steps>
+  <Step title="Transaction nonce must match account nonce">
+    If account has nonce 5, next transaction must have nonce 5.
+  </Step>
+  <Step title="Nonce increments after successful execution">
+    After executing transaction with nonce 5, account nonce becomes 6.
+  </Step>
+  <Step title="Failed transactions still increment nonce">
+    Even if execution fails, nonce increases to prevent replay.
+  </Step>
+  <Step title="Transactions executed in nonce order">
+    Nonce 5 must execute before nonce 6, even if submitted out of order.
+  </Step>
+</Steps>
+
+## Transactions
+
+### Transaction Structure
+
+Transactions are the only way to modify blockchain state:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Transaction {
+    /// Sender's nonce (sequence number).
+    pub nonce: u64,
+    /// Sender's address.
+    pub from: Address,
+    /// Recipient's address (None for contract deployment).
+    pub to: Option<Address>,
+    /// Value to transfer.
+    pub value: u64,
+    /// Transaction data (calldata or contract bytecode).
+    pub data: Vec<u8>,
+    /// Maximum gas to use.
+    pub gas_limit: u64,
+    /// Price per unit of gas.
+    pub gas_price: u64,
+    /// Transaction signature.
+    pub signature: Signature,
+}
+```
+
+### Transaction Types
+
+Minichain supports three transaction types, distinguished by the `to` and `data` fields:
+
+#### 1. Value Transfer
+
+Simplest transaction type — send tokens from one account to another.
+
+```rust
+// Create a transfer transaction
+let tx = Transaction::transfer(
+    from,        // Sender address
+    to,          // Recipient address
+    1000,        // Amount to transfer
+    0,           // Nonce
+    1,           // Gas price
+);
+
+assert!(tx.is_transfer());
+assert_eq!(tx.to, Some(to));
+assert_eq!(tx.data, Vec::new());  // No data for transfers
+assert_eq!(tx.gas_limit, 21_000); // Base gas cost
+```
+
+**Characteristics:**
+- `to`: `Some(address)` — recipient address
+- `data`: `[]` — empty data
+- Gas cost: 21,000 (minimum)
+
+**CLI Usage:**
+```bash
+minichain tx send --from alice --to 0x1234... --amount 1000
+```
+
+#### 2. Contract Deployment
+
+Deploy a new smart contract to the blockchain.
+
+```rust
+// Create a deployment transaction
+let bytecode = vec![0x70, 0x00, 0x00, 0x00, ...];  // Compiled contract
+let tx = Transaction::deploy(
+    from,        // Deployer address
+    bytecode,    // Contract bytecode
+    0,           // Nonce
+    100_000,     // Gas limit (higher for deployment)
+    1,           // Gas price
+);
+
+assert!(tx.is_deploy());
+assert_eq!(tx.to, None);           // No recipient for deployment
+assert_eq!(tx.value, 0);           // No value transfer
+assert!(!tx.data.is_empty());      // Bytecode in data field
+
+// Calculate contract address
+let contract_addr = tx.contract_address().unwrap();
+```
+
+**Characteristics:**
+- `to`: `None` — signals deployment
+- `data`: Contract bytecode
+- `value`: Usually 0 (can send initial balance)
+- Gas cost: 200 per byte + execution cost
+
+**Contract Address Calculation:**
+
+```rust
+// Contract address = first 20 bytes of hash(sender || nonce)
+let mut data = Vec::new();
+data.extend_from_slice(&sender.0);
+data.extend_from_slice(&nonce.to_le_bytes());
+let hash = hash(&data);
+let address = Address::from_bytes(&hash.0[..20]);
+```
+
+<Tip>
+  Contract addresses are deterministic! The same sender deploying with the same nonce will always produce the same contract address.
+</Tip>
+
+**CLI Usage:**
+```bash
+minichain deploy --from alice --source counter.asm --gas-limit 80000
+```
+
+#### 3. Contract Call
+
+Invoke a function in an existing smart contract.
+
+```rust
+// Create a contract call transaction
+let calldata = vec![0x01, 0x02, 0x03];  // Function selector + arguments
+let tx = Transaction::call(
+    from,        // Caller address
+    contract,    // Contract address
+    calldata,    // Function call data
+    0,           // Value to send
+    0,           // Nonce
+    50_000,      // Gas limit
+    1,           // Gas price
+);
+
+assert!(tx.is_call());
+assert_eq!(tx.to, Some(contract));
+assert!(!tx.data.is_empty());
+```
+
+**Characteristics:**
+- `to`: `Some(address)` — contract address
+- `data`: Non-empty calldata
+- `value`: Optional value to send to contract
+- Gas cost: 21,000 base + execution cost
+
+**CLI Usage:**
+```bash
+minichain call --from alice --to 0x5678... --data 01020304
+```
+
+### Transaction Signing
+
+All transactions must be signed with Ed25519:
+
+```rust
+// 1. Create unsigned transaction
+let mut tx = Transaction::transfer(from, to, 100, 0, 1);
+
+// 2. Calculate signing hash (excludes signature)
+let signing_hash = tx.signing_hash();
+
+// 3. Sign with private key
+let keypair = Keypair::generate();
+tx.sign(&keypair);
+
+// Or use the builder pattern
+let tx = Transaction::transfer(from, to, 100, 0, 1).signed(&keypair);
+```
+
+**Signing Hash:**
+
+The signing hash is computed over all fields *except* the signature:
+
+```rust
+struct UnsignedTransaction {
+    nonce: u64,
+    from: Address,
+    to: Option<Address>,
+    value: u64,
+    data: Vec<u8>,
+    gas_limit: u64,
+    gas_price: u64,
+}
+
+let encoded = bincode::serialize(&unsigned).unwrap();
+let hash = blake3::hash(&encoded);
+```
+
+<Warning>
+  Never sign a transaction twice! Each signature should be over the unsigned transaction data. Signing an already-signed transaction will produce an invalid signature.
+</Warning>
+
+### Transaction Verification
+
+Verify a transaction signature:
+
+```rust
+// Verify signature matches the claimed sender
+let sender_pubkey = get_public_key(&tx.from)?;
+tx.verify(&sender_pubkey)?;
+
+// Internally:
+let hash = tx.signing_hash();
+public_key.verify(hash.as_bytes(), &tx.signature)?;
+```
+
+**Verification Steps:**
+
+<Steps>
+  <Step title="Recompute signing hash">
+    Hash all transaction fields except signature.
+  </Step>
+  <Step title="Verify Ed25519 signature">
+    Check signature is valid for hash and public key.
+  </Step>
+  <Step title="Check address matches public key">
+    Ensure `from` address is derived from public key.
+  </Step>
+</Steps>
+
+### Transaction Validation
+
+Before accepting a transaction, the blockchain validates:
+
+```rust
+// 1. Signature verification
+tx.verify(&sender_public_key)
+    .map_err(|_| ValidationError::InvalidSignature)?;
+
+// 2. Nonce check
+let account = storage.get_account(&tx.from)?;
+if tx.nonce != account.nonce {
+    return Err(ValidationError::InvalidNonce {
+        expected: account.nonce,
+        got: tx.nonce,
+    });
+}
+
+// 3. Balance check
+let max_cost = tx.value + (tx.gas_limit * tx.gas_price);
+if account.balance < max_cost {
+    return Err(ValidationError::InsufficientBalance {
+        required: max_cost,
+        available: account.balance,
+    });
+}
+
+// 4. Gas limit check
+if tx.gas_limit < BASE_GAS {
+    return Err(ValidationError::GasLimitTooLow);
+}
+```
+
+### Transaction Hashes
+
+Transactions have two types of hashes:
+
+#### 1. Signing Hash (excludes signature)
+
+```rust
+let signing_hash = tx.signing_hash();
+// Used for: Creating and verifying signatures
+```
+
+#### 2. Transaction Hash (includes signature)
+
+```rust
+let tx_hash = tx.hash();
+// Used for: Transaction IDs, merkle trees, receipts
+```
+
+<Note>
+  The transaction hash includes the signature, so it uniquely identifies a specific signed transaction. The signing hash is the same for all signatures of the same unsigned transaction.
+</Note>
+
+### Maximum Transaction Cost
+
+Calculate the maximum amount a transaction could cost:
+
+```rust
+let max_cost = tx.max_cost();
+// max_cost = value + (gas_limit * gas_price)
+
+// Example:
+// value = 1000
+// gas_limit = 50000
+// gas_price = 2
+// max_cost = 1000 + (50000 * 2) = 101,000
+```
+
+This amount is checked against the sender's balance before execution.
+
+## Address System
+
+### Address Format
+
+Addresses are 20-byte identifiers:
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Address(pub [u8; 20]);
+
+// Create from bytes
+let addr = Address::from_bytes([0x01; 20]);
+
+// Display as hex
+println!("Address: 0x{}", addr);  // 0x0101010101...
+```
+
+### Address Derivation
+
+Addresses are derived from Ed25519 public keys:
+
+```rust
+// Generate keypair
+let keypair = Keypair::generate();
+
+// Derive address from public key
+let address = keypair.address();
+
+// Internally: address = first 20 bytes of hash(public_key)
+let hash = blake3::hash(public_key.as_bytes());
+let address = Address::from_bytes(&hash[..20]);
+```
+
+<Tip>
+  Unlike Ethereum (which uses Keccak-256), Minichain uses Blake3 for address derivation. Blake3 is significantly faster and provides the same security level.
+</Tip>
+
+## Real-World Examples
+
+### Example 1: Simple Transfer
+
+```rust
+// Alice sends 100 tokens to Bob
+let alice_keypair = load_keypair("alice")?;
+let bob_address = Address::from_hex("0x1234...")?;
+
+// Get Alice's current nonce
+let alice_account = storage.get_account(&alice_keypair.address())?;
+
+// Create and sign transaction
+let tx = Transaction::transfer(
+    alice_keypair.address(),
+    bob_address,
+    100,                    // amount
+    alice_account.nonce,    // current nonce
+    1,                      // gas price
+).signed(&alice_keypair);
+
+// Submit to blockchain
+blockchain.submit_transaction(tx)?;
+```
+
+### Example 2: Deploy Counter Contract
+
+```rust
+// Compile assembly to bytecode
+let source = std::fs::read_to_string("counter.asm")?;
+let bytecode = assembler.compile(&source)?;
+
+// Get deployer's nonce
+let deployer_account = storage.get_account(&deployer_keypair.address())?;
+
+// Create deployment transaction
+let tx = Transaction::deploy(
+    deployer_keypair.address(),
+    bytecode,
+    deployer_account.nonce,
+    100_000,  // gas limit
+    1,        // gas price
+).signed(&deployer_keypair);
+
+// Calculate contract address before deploying
+let contract_address = tx.contract_address().unwrap();
+println!("Contract will be deployed at: {}", contract_address);
+
+// Submit transaction
+blockchain.submit_transaction(tx)?;
+```
+
+### Example 3: Call Contract
+
+```rust
+// Call the counter contract's increment function
+let caller_keypair = load_keypair("alice")?;
+let contract_address = Address::from_hex("0x5678...")?;
+
+// Get caller's nonce
+let caller_account = storage.get_account(&caller_keypair.address())?;
+
+// Prepare calldata (empty for simple increment)
+let calldata = vec![];
+
+// Create call transaction
+let tx = Transaction::call(
+    caller_keypair.address(),
+    contract_address,
+    calldata,
+    0,                      // no value transfer
+    caller_account.nonce,
+    50_000,                 // gas limit
+    1,                      // gas price
+).signed(&caller_keypair);
+
+// Submit transaction
+blockchain.submit_transaction(tx)?;
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always verify signatures before accepting transactions">
+    ```rust
+    // ✅ Good: Verify before adding to mempool
+    tx.verify(&sender_public_key)?;
+    mempool.add(tx)?;
+
+    // ❌ Bad: Add without verification
+    mempool.add(tx)?;  // Could add invalid transactions!
+    ```
+  </Accordion>
+
+  <Accordion title="Check nonces match account state">
+    ```rust
+    // ✅ Good: Enforce nonce ordering
+    if tx.nonce != account.nonce {
+        return Err(ValidationError::InvalidNonce);
+    }
+
+    // ❌ Bad: Allow any nonce
+    // This allows replay attacks!
+    ```
+  </Accordion>
+
+  <Accordion title="Verify sufficient balance for max cost">
+    ```rust
+    // ✅ Good: Check max possible cost
+    let max_cost = tx.value + (tx.gas_limit * tx.gas_price);
+    if account.balance < max_cost {
+        return Err(ValidationError::InsufficientBalance);
+    }
+
+    // ❌ Bad: Only check transfer value
+    // Sender might not have enough for gas!
+    ```
+  </Accordion>
+
+  <Accordion title="Increment nonce even on failed execution">
+    ```rust
+    // ✅ Good: Always increment nonce
+    match execute_transaction(&tx) {
+        Ok(_) => {
+            account.increment_nonce();
+            storage.commit();
+        }
+        Err(_) => {
+            account.increment_nonce();  // Still increment!
+            storage.commit();
+        }
+    }
+
+    // ❌ Bad: Only increment on success
+    // This allows replaying failed transactions!
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Blocks & Consensus" icon="cube" href="/core-concepts/blocks-and-consensus">
+    Learn how transactions are grouped into blocks
+  </Card>
+  <Card title="Gas System" icon="gauge" href="/core-concepts/gas-system">
+    Understand gas metering and operation costs
+  </Card>
+  <Card title="Virtual Machine" icon="microchip" href="/vm/overview">
+    See how transactions execute in the VM
+  </Card>
+  <Card title="Smart Contracts" icon="file-code" href="/smart-contracts/writing-contracts">
+    Write your first smart contract
+  </Card>
+</CardGroup>

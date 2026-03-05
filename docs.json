@@ -1,0 +1,145 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "Minichain",
+  "theme": "aspen",
+  "colors": {
+    "primary": "#7B61FF",
+    "light": "#9B84FF",
+    "dark": "#5B41DF"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/jayendra-info/minichain"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/jayendra-info/minichain"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "core-concepts/architecture",
+              "core-concepts/accounts-and-transactions",
+              "core-concepts/blocks-and-consensus",
+              "core-concepts/gas-system"
+            ]
+          },
+          {
+            "group": "Virtual Machine",
+            "pages": [
+              "vm/overview",
+              "vm/registers-and-memory",
+              "vm/opcodes",
+              "vm/gas-metering",
+              "vm/execution-model"
+            ]
+          },
+          {
+            "group": "Smart Contracts",
+            "pages": [
+              "smart-contracts/assembly-language",
+              "smart-contracts/writing-contracts",
+              "smart-contracts/deploying-contracts",
+              "smart-contracts/calling-contracts",
+              "smart-contracts/examples"
+            ]
+          },
+          {
+            "group": "CLI Usage",
+            "pages": [
+              "cli/overview",
+              "cli/initialization",
+              "cli/account-management",
+              "cli/transactions",
+              "cli/block-production",
+              "cli/contract-operations",
+              "cli/exploring"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/complete-workflow",
+              "guides/writing-first-contract",
+              "guides/debugging-contracts",
+              "guides/testing"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/core/hash",
+              "api/core/crypto",
+              "api/core/account",
+              "api/core/transaction",
+              "api/core/block",
+              "api/core/merkle"
+            ]
+          },
+          {
+            "group": "Storage",
+            "pages": [
+              "api/storage/database",
+              "api/storage/state",
+              "api/storage/chain"
+            ]
+          },
+          {
+            "group": "Virtual Machine",
+            "pages": [
+              "api/vm/executor",
+              "api/vm/opcodes-reference",
+              "api/vm/memory",
+              "api/vm/gas",
+              "api/vm/tracer"
+            ]
+          },
+          {
+            "group": "Assembler",
+            "pages": [
+              "api/assembler/lexer",
+              "api/assembler/parser",
+              "api/assembler/compiler"
+            ]
+          },
+          {
+            "group": "Consensus",
+            "pages": [
+              "api/consensus/poa",
+              "api/consensus/validator"
+            ]
+          },
+          {
+            "group": "Chain",
+            "pages": [
+              "api/chain/blockchain",
+              "api/chain/mempool",
+              "api/chain/executor"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

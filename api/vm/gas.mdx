@@ -1,0 +1,418 @@
+---
+title: Gas
+description: Gas metering and cost management for VM operations
+---
+
+The gas module implements execution cost tracking to prevent infinite loops and expensive operations.
+
+## GasCosts Struct
+
+Defines gas costs for all VM operations.
+
+```rust
+pub struct GasCosts;
+```
+
+### Constants
+
+#### Tier 1: Very Cheap (Simple Register Operations)
+
+<ParamField path="ZERO" type="u64" default="0">
+  No cost operations: HALT, NOP, RET, REVERT
+</ParamField>
+
+<ParamField path="BASE" type="u64" default="2">
+  Simple register operations: ADD, SUB, AND, OR, XOR, MOV, EQ, NE, LT, GT, LE, GE, ISZERO, LOADI, MSIZE, CALLER, CALLVALUE, ADDRESS, BLOCKNUMBER, TIMESTAMP, GAS, LOG
+</ParamField>
+
+#### Tier 2: Cheap (Complex ALU Operations)
+
+<ParamField path="LOW" type="u64" default="3">
+  More complex operations: MUL, comparison operations
+</ParamField>
+
+#### Tier 3: Medium (Division, Shifts)
+
+<ParamField path="MID" type="u64" default="5">
+  Expensive ALU operations: DIV, MOD, SHL, SHR
+</ParamField>
+
+#### Tier 4: Memory Operations
+
+<ParamField path="MEMORY_READ" type="u64" default="3">
+  Cost to read from memory: LOAD8, LOAD64, MCOPY
+</ParamField>
+
+<ParamField path="MEMORY_WRITE" type="u64" default="3">
+  Cost to write to memory: STORE8, STORE64
+</ParamField>
+
+<ParamField path="MEMORY_GROW_PER_BYTE" type="u64" default="1">
+  Cost per byte when expanding memory
+</ParamField>
+
+#### Tier 5: Storage (Expensive!)
+
+<ParamField path="SLOAD" type="u64" default="100">
+  Cost to read from persistent storage
+</ParamField>
+
+<ParamField path="SSTORE_SET" type="u64" default="20000">
+  Cost to write to an empty storage slot
+</ParamField>
+
+<ParamField path="SSTORE_RESET" type="u64" default="5000">
+  Cost to overwrite an existing storage slot
+</ParamField>
+
+#### Control Flow
+
+<ParamField path="JUMP" type="u64" default="8">
+  Cost for JUMP and JUMPI operations
+</ParamField>
+
+<ParamField path="CALL" type="u64" default="700">
+  Cost for CALL operation
+</ParamField>
+
+## GasMeter Struct
+
+Tracks gas consumption during execution.
+
+```rust
+pub struct GasMeter {
+    remaining: u64,
+    used: u64,
+}
+```
+
+<ParamField path="remaining" type="u64">
+  Amount of gas still available
+</ParamField>
+
+<ParamField path="used" type="u64">
+  Amount of gas consumed so far
+</ParamField>
+
+### Methods
+
+#### new
+
+Create a new gas meter with the specified limit.
+
+```rust
+pub fn new(limit: u64) -> Self
+```
+
+<ParamField path="limit" type="u64" required>
+  Maximum gas available for execution
+</ParamField>
+
+<ResponseField name="meter" type="GasMeter">
+  New gas meter with remaining=limit, used=0
+</ResponseField>
+
+**Example**:
+```rust
+use minichain_vm::GasMeter;
+
+let mut gas = GasMeter::new(100_000);
+assert_eq!(gas.remaining(), 100_000);
+assert_eq!(gas.used(), 0);
+```
+
+#### consume
+
+Consume gas, returning an error if insufficient.
+
+```rust
+pub fn consume(&mut self, amount: u64) -> Result<(), VmError>
+```
+
+<ParamField path="amount" type="u64" required>
+  Amount of gas to consume
+</ParamField>
+
+<ResponseField name="result" type="Result<(), VmError>">
+  Ok(()) if successful, Err(VmError::OutOfGas) if insufficient gas
+</ResponseField>
+
+**Example**:
+```rust
+use minichain_vm::{GasMeter, GasCosts};
+
+let mut gas = GasMeter::new(10);
+
+// Successful consumption
+gas.consume(GasCosts::BASE)?;  // Consumes 2
+assert_eq!(gas.remaining(), 8);
+
+// Failed consumption
+let result = gas.consume(100);
+assert!(result.is_err());
+```
+
+#### remaining
+
+Get the amount of gas still available.
+
+```rust
+pub fn remaining(&self) -> u64
+```
+
+<ResponseField name="gas" type="u64">
+  Remaining gas
+</ResponseField>
+
+#### used
+
+Get the total amount of gas consumed.
+
+```rust
+pub fn used(&self) -> u64
+```
+
+<ResponseField name="gas" type="u64">
+  Gas used so far
+</ResponseField>
+
+**Example**:
+```rust
+let mut gas = GasMeter::new(1000);
+gas.consume(100)?;
+gas.consume(50)?;
+
+assert_eq!(gas.used(), 150);
+assert_eq!(gas.remaining(), 850);
+```
+
+#### memory_expansion_cost
+
+Calculate gas cost for expanding memory.
+
+```rust
+pub fn memory_expansion_cost(current_size: usize, new_size: usize) -> u64
+```
+
+<ParamField path="current_size" type="usize" required>
+  Current memory size in bytes
+</ParamField>
+
+<ParamField path="new_size" type="usize" required>
+  Target memory size in bytes
+</ParamField>
+
+<ResponseField name="cost" type="u64">
+  Additional gas required for expansion (0 if new_size is less than or equal to current_size)
+</ResponseField>
+
+**Example**:
+```rust
+use minichain_vm::GasMeter;
+
+// Expanding from 1KB to 2KB
+let cost = GasMeter::memory_expansion_cost(1024, 2048);
+assert_eq!(cost, 1024);  // 1 gas per byte
+
+// No expansion needed
+let cost = GasMeter::memory_expansion_cost(1024, 512);
+assert_eq!(cost, 0);
+```
+
+## Gas Cost Table
+
+| Operation Category | Opcode Examples | Gas Cost |
+|--------------------|----------------|----------|
+| **Control** | HALT, NOP, RET, REVERT | 0 |
+| **Simple ALU** | ADD, SUB, AND, OR, XOR, MOV | 2 |
+| **Comparisons** | EQ, NE, LT, GT, LE, GE | 2 |
+| **Complex ALU** | MUL | 3 |
+| **Division** | DIV, MOD | 5 |
+| **Shifts** | SHL, SHR | 5 |
+| **Memory Read** | LOAD8, LOAD64 | 3 |
+| **Memory Write** | STORE8, STORE64 | 3 |
+| **Memory Copy** | MCOPY | 3 |
+| **Jumps** | JUMP, JUMPI | 8 |
+| **Storage Read** | SLOAD | 100 |
+| **Storage Write (new)** | SSTORE | 20,000 |
+| **Storage Write (update)** | SSTORE | 5,000 |
+| **External Call** | CALL | 700 |
+| **Context** | CALLER, ADDRESS, etc. | 2 |
+| **Immediates** | LOADI | 2 |
+| **Debug** | LOG | 2 |
+
+## Usage Examples
+
+### Basic Gas Metering
+
+```rust
+use minichain_vm::{GasMeter, GasCosts, VmError};
+
+let mut gas = GasMeter::new(1000);
+
+// Execute a series of operations
+gas.consume(GasCosts::BASE)?;      // ADD: -2
+gas.consume(GasCosts::BASE)?;      // MOV: -2
+gas.consume(GasCosts::MID)?;       // DIV: -5
+gas.consume(GasCosts::MEMORY_WRITE)?;  // STORE64: -3
+
+println!("Gas used: {}", gas.used());         // 12
+println!("Gas remaining: {}", gas.remaining()); // 988
+```
+
+### Handling Out of Gas
+
+```rust
+use minichain_vm::{GasMeter, GasCosts, VmError};
+
+let mut gas = GasMeter::new(5);
+
+// First operation succeeds
+gas.consume(GasCosts::BASE)?;  // 2 gas
+
+// Second operation fails
+match gas.consume(GasCosts::MID) {
+    Err(VmError::OutOfGas { required, remaining }) => {
+        println!("Out of gas! Need {}, have {}", required, remaining);
+        // Output: "Out of gas! Need 5, have 3"
+    }
+    _ => unreachable!(),
+}
+```
+
+### Storage Gas Costs
+
+```rust
+use minichain_vm::{GasMeter, GasCosts};
+
+let mut gas = GasMeter::new(50_000);
+
+// Writing to empty slot (expensive)
+gas.consume(GasCosts::SSTORE_SET)?;  // -20,000
+assert_eq!(gas.remaining(), 30_000);
+
+// Updating existing slot (cheaper)
+gas.consume(GasCosts::SSTORE_RESET)?;  // -5,000
+assert_eq!(gas.remaining(), 25_000);
+
+// Reading is much cheaper
+gas.consume(GasCosts::SLOAD)?;  // -100
+assert_eq!(gas.remaining(), 24_900);
+```
+
+### Memory Expansion
+
+```rust
+use minichain_vm::GasMeter;
+
+let current_size = 0;
+let new_size = 1024;
+
+let expansion_cost = GasMeter::memory_expansion_cost(current_size, new_size);
+assert_eq!(expansion_cost, 1024);  // 1 gas per byte
+
+// Incremental expansion
+let cost = GasMeter::memory_expansion_cost(1024, 2048);
+assert_eq!(cost, 1024);  // Only pay for the new bytes
+```
+
+### Estimating Execution Cost
+
+```rust
+use minichain_vm::{GasMeter, GasCosts};
+
+fn estimate_loop_cost(iterations: u64) -> u64 {
+    let per_iteration = 
+        GasCosts::ADDI +        // Counter increment: 2
+        GasCosts::BASE +        // Comparison: 2
+        GasCosts::JUMP;         // Loop jump: 8
+    
+    iterations * per_iteration
+}
+
+let cost = estimate_loop_cost(1000);
+println!("Estimated cost for 1000 iterations: {} gas", cost);
+// Output: "Estimated cost for 1000 iterations: 12000 gas"
+
+let mut gas = GasMeter::new(cost);
+assert!(gas.remaining() >= cost);
+```
+
+### Complex Program Gas Tracking
+
+```rust
+use minichain_vm::{Vm, GasCosts};
+use minichain_core::Address;
+
+// Bytecode: Load value, compute, store to storage
+let bytecode = vec![
+    // ... bytecode here ...
+];
+
+// Calculate minimum gas needed
+let min_gas = 
+    2 * GasCosts::LOADI +         // 2 immediate loads
+    GasCosts::BASE * 3 +          // 3 ALU operations
+    GasCosts::SSTORE_SET +        // Storage write
+    GasCosts::ZERO;               // HALT
+
+let mut vm = Vm::new(
+    bytecode,
+    min_gas,  // Provide exact amount needed
+    Address::zero(),
+    Address::zero(),
+    0,
+);
+
+let result = vm.run()?;
+println!("Actual gas used: {}", result.gas_used);
+println!("Estimated: {}", min_gas);
+```
+
+## Gas Optimization Tips
+
+### Use Cheaper Operations
+
+```rust
+// Expensive: DIV (5 gas)
+DIV R0, R1, R2
+
+// Cheaper: SHR for division by powers of 2 (5 gas, but simpler)
+LOADI R2, 1
+SHR R0, R1, R2  // Divide by 2
+```
+
+### Minimize Storage Operations
+
+```rust
+// Bad: Multiple storage writes (20,000 gas each)
+SSTORE key1, value1
+SSTORE key2, value2
+SSTORE key3, value3
+// Total: 60,000 gas
+
+// Good: Pack values and write once
+SHL combined, value1, 16
+OR combined, combined, value2
+SSTORE key, combined
+// Total: ~20,010 gas
+```
+
+### Batch Memory Operations
+
+```rust
+// Use MCOPY instead of individual loads/stores
+MCOPY dest, src, 64  // 3 gas for 64 bytes
+
+// vs. 8 individual LOAD64/STORE64 operations
+// 8 * (3 + 3) = 48 gas
+```
+
+## Best Practices
+
+1. **Always check gas limits** before executing untrusted code
+2. **Use SSTORE_RESET** when possible (4x cheaper than SSTORE_SET)
+3. **Cache storage reads** in registers to avoid repeated SLOAD
+4. **Prefer register operations** over memory operations
+5. **Be careful with loops** - they can consume gas quickly
+6. **Estimate gas requirements** ahead of time for better UX

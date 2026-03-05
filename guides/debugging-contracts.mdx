@@ -1,0 +1,483 @@
+---
+title: Debugging Contracts
+description: Learn how to debug Minichain smart contracts using the VM tracer and other debugging tools
+---
+
+Learn how to debug smart contracts using Minichain's built-in VM tracer, understand execution traces, and diagnose common issues.
+
+## Debugging Tools Overview
+
+Minichain provides several tools for debugging:
+
+- **VM Tracer**: Records every instruction executed
+- **LOG Opcode**: Emit debug values during execution
+- **Gas Monitoring**: Track gas consumption per instruction
+- **Error Messages**: Detailed error information
+- **Register Inspection**: View register state at each step
+
+## Understanding the VM Tracer
+
+The VM tracer records detailed information about contract execution:
+
+```rust
+pub struct TraceStep {
+    pub pc: usize,              // Program counter
+    pub opcode: Opcode,         // Instruction executed
+    pub gas_before: u64,        // Gas before instruction
+    pub gas_after: u64,         // Gas after instruction
+    pub registers: [u64; 16],   // All 16 register values
+}
+```
+
+Each step captures:
+- **PC (Program Counter)**: Current position in bytecode
+- **Opcode**: Instruction being executed
+- **Gas**: Remaining gas before and after
+- **Registers**: Complete register state (R0-R15)
+
+## Using the Tracer
+
+<Steps>
+
+1. **Enable Tracing in Code**
+
+   When creating a VM instance, enable the tracer:
+
+   ```rust
+   use minichain_vm::{Vm, Tracer};
+   
+   // Create VM with tracer enabled
+   let mut tracer = Tracer::new(true);
+   let mut vm = Vm::new(
+       bytecode,
+       gas_limit,
+       caller,
+       address,
+       value
+   );
+   
+   // After execution, print trace
+   tracer.print_trace();
+   ```
+
+2. **Understanding Trace Output**
+
+   The tracer prints execution in this format:
+   ```
+   Step: PC=XXXX Opcode gas=XXXX R0=X R1=X R2=X
+   ```
+
+   Example trace for the counter contract:
+   ```
+      0: PC=0000 LOADI gas=999998 R0=0 R1=0 R2=0
+      1: PC=000A SLOAD gas=999898 R0=0 R1=0 R2=0
+      2: PC=000C LOADI gas=999896 R0=0 R1=0 R2=1
+      3: PC=0016 ADD gas=999894 R0=0 R1=1 R2=1
+      4: PC=0019 SSTORE gas=994894 R0=0 R1=1 R2=1
+      5: PC=001B HALT gas=994894 R0=0 R1=1 R2=1
+   ```
+
+3. **Analyze Execution Flow**
+
+   **Step 0: Load Immediate**
+   ```
+   PC=0000 LOADI gas=999998 R0=0
+   ```
+   - Started with 1,000,000 gas
+   - LOADI loaded `0` into R0 (costs 2 gas)
+   - R0 now contains storage slot number
+
+   **Step 1: Storage Load**
+   ```
+   PC=000A SLOAD gas=999898 R0=0 R1=0
+   ```
+   - SLOAD read from storage slot 0 (R0)
+   - Loaded value `0` into R1 (first call, slot empty)
+   - Cost 100 gas
+   - Program counter jumped to 0x000A
+
+   **Step 2: Load Increment**
+   ```
+   PC=000C LOADI gas=999896 R0=0 R1=0 R2=1
+   ```
+   - Loaded constant `1` into R2
+   - This is the increment amount
+
+   **Step 3: Perform Addition**
+   ```
+   PC=0016 ADD gas=999894 R0=0 R1=1 R2=1
+   ```
+   - Added R1 (0) + R2 (1) = 1
+   - Result stored in R1
+   - R1 now contains the new counter value
+
+   **Step 4: Store Result**
+   ```
+   PC=0019 SSTORE gas=994894 R0=0 R1=1 R2=1
+   ```
+   - Stored R1 (1) to storage slot R0 (0)
+   - Cost 5,000 gas (writing to existing slot)
+   - Notice the large gas drop!
+
+   **Step 5: Halt**
+   ```
+   PC=001B HALT gas=994894
+   ```
+   - Execution completed successfully
+   - Total gas used: 1,000,000 - 994,894 = **5,106 gas**
+
+4. **Using LOG for Debugging**
+
+   Add LOG instructions to emit values:
+
+   ```asm
+   .entry main
+
+   main:
+       LOADI R0, 0
+       SLOAD R1, R0
+       LOG R1              ; Debug: print current value
+       
+       LOADI R2, 1
+       ADD R1, R1, R2
+       LOG R1              ; Debug: print new value
+       
+       SSTORE R0, R1
+       HALT
+   ```
+
+   The LOG opcode emits values that appear in execution results:
+   ```rust
+   let result = vm.run().unwrap();
+   println!("Logs: {:?}", result.logs);  // [0, 1]
+   ```
+
+</Steps>
+
+## Common Debugging Scenarios
+
+### Scenario 1: Out of Gas
+
+**Symptom:**
+```
+Error: Out of gas: required 100, remaining 50
+```
+
+**How to debug:**
+
+1. Check the trace to see where gas ran out:
+   ```
+   98: PC=01A4 SLOAD gas=50 R0=5 R1=100
+   Error: Out of gas
+   ```
+
+2. Identify expensive operations:
+   - **SSTORE**: 5,000-20,000 gas
+   - **SLOAD**: 100 gas
+   - Loops with many iterations
+
+3. Solutions:
+   - Increase gas limit when deploying/calling
+   - Optimize contract: reduce storage operations
+   - Break complex operations into multiple transactions
+
+**Example fix:**
+```bash
+# Increase gas limit
+cargo run --release -- call \
+  --from alice \
+  --to 0xCONTRACT \
+  --gas-limit 100000  # Was 50000
+```
+
+### Scenario 2: Incorrect Storage Values
+
+**Symptom:**
+Counter always returns 0 instead of incrementing.
+
+**How to debug:**
+
+1. Add LOG instructions to inspect values:
+   ```asm
+   SLOAD R1, R0
+   LOG R1           ; Check what we loaded
+   ADD R1, R1, R2
+   LOG R1           ; Check the new value
+   SSTORE R0, R1
+   ```
+
+2. Check the trace for storage operations:
+   ```
+   PC=000A SLOAD gas=999898 R0=0 R1=0
+   PC=0019 SSTORE gas=994894 R0=0 R1=1  ← Stored 1
+   ```
+
+3. Verify storage slot numbers:
+   ```asm
+   LOADI R0, 0      ; Using slot 0
+   SLOAD R1, R0     ; Loading from slot 0
+   SSTORE R0, R1    ; Storing to slot 0
+   ```
+
+   Make sure the same slot is used for load and store!
+
+### Scenario 3: Wrong Register Values
+
+**Symptom:**
+Calculation produces unexpected results.
+
+**Debugging approach:**
+
+```asm
+; Buggy code
+LOADI R0, 10
+LOADI R1, 20
+ADD R2, R0, R1    ; Should be 30
+LOG R2            ; Debug: check result
+
+; Oops! Accidentally overwrite R2
+LOADI R2, 5       ; Bug: overwrites R2
+MUL R3, R2, R2    ; Uses wrong R2 value!
+LOG R3            ; Will show 25, not 900
+```
+
+**Trace shows the issue:**
+```
+0: PC=0000 LOADI gas=X R0=10 R1=0 R2=0
+1: PC=000A LOADI gas=X R0=10 R1=20 R2=0
+2: PC=0014 ADD gas=X R0=10 R1=20 R2=30   ← R2 correct
+3: PC=0017 LOADI gas=X R0=10 R1=20 R2=5  ← R2 overwritten!
+4: PC=0021 MUL gas=X R0=10 R1=20 R3=25   ← Wrong result
+```
+
+**Fix:** Use different registers or save R2:
+```asm
+LOADI R0, 10
+LOADI R1, 20
+ADD R2, R0, R1     ; R2 = 30
+MOV R4, R2         ; Save R2 to R4
+LOADI R2, 5        ; Now safe to use R2
+MUL R3, R4, R4     ; Use saved value: 900
+```
+
+### Scenario 4: Invalid Jump
+
+**Symptom:**
+```
+Error: Invalid jump destination: 9999
+```
+
+**How to debug:**
+
+1. Check label resolution:
+   ```asm
+   LOADI R5, loop_start    ; Label as immediate
+   JUMP R5
+   
+   loop_start:
+       ; code here
+   ```
+
+2. Verify bytecode length:
+   - Jump target must be within bytecode bounds
+   - Check for typos in label names
+
+3. Use tracer to see where jump occurred:
+   ```
+   PC=0050 LOADI gas=X R5=9999
+   PC=005A JUMP gas=X R5=9999
+   Error: Invalid jump destination: 9999
+   ```
+
+**Fix:** Ensure label exists:
+```asm
+.entry main
+
+main:
+    LOADI R5, end    ; Label must exist
+    JUMP R5
+
+end:                 ; Define the label!
+    HALT
+```
+
+### Scenario 5: Division by Zero
+
+**Symptom:**
+```
+Error: Division by zero
+```
+
+**Prevention pattern:**
+```asm
+; Safe division
+LOADI R0, 100       ; dividend
+LOADI R1, 0         ; divisor (could be from input)
+
+; Check for zero before dividing
+ISZERO R1           ; R1 = (R1 == 0) ? 1 : 0
+LOADI R2, error
+JUMPI R1, R2        ; If zero, jump to error handler
+
+; Safe to divide
+DIV R3, R0, R1
+HALT
+
+error:
+    REVERT           ; Revert transaction
+```
+
+## Debugging Workflow
+
+<Steps>
+
+1. **Reproduce the Issue**
+   - Deploy contract with known inputs
+   - Call contract and observe failure
+   - Note error message and transaction details
+
+2. **Add Debug Instrumentation**
+   ```asm
+   ; Add LOG statements at key points
+   LOADI R0, 0
+   LOG R0           ; Check initial value
+   
+   SLOAD R1, R0
+   LOG R1           ; Check loaded value
+   
+   ADD R1, R1, R2
+   LOG R1           ; Check computed value
+   ```
+
+3. **Run with Tracer**
+   - Enable VM tracer
+   - Execute the failing transaction
+   - Review trace output line by line
+
+4. **Analyze Register State**
+   - Check register values at each step
+   - Verify calculations are correct
+   - Identify where values diverge from expected
+
+5. **Check Gas Consumption**
+   - Look for unexpected gas spikes
+   - Calculate expected vs actual gas
+   - Identify expensive operations
+
+6. **Fix and Verify**
+   - Make necessary changes to assembly
+   - Remove or disable debug LOGs
+   - Test with various inputs
+   - Monitor gas usage
+
+</Steps>
+
+## Best Practices
+
+### During Development
+
+1. **Use Liberal Logging**
+   ```asm
+   LOG R0           ; Log inputs
+   ; ... computation ...
+   LOG R1           ; Log outputs
+   ```
+
+2. **Comment Your Code**
+   ```asm
+   ; R0 = storage slot for counter
+   ; R1 = current counter value
+   ; R2 = increment amount
+   ```
+
+3. **Test Incrementally**
+   - Write and test small functions first
+   - Build up to complex logic
+   - Verify each section works independently
+
+### For Production
+
+1. **Remove Debug Logs**
+   ```asm
+   ; LOG R1       ; Comment out before deployment
+   ```
+   Saves 2 gas per LOG instruction.
+
+2. **Add Input Validation**
+   ```asm
+   ; Validate divisor is non-zero
+   ISZERO R2
+   LOADI R3, error_handler
+   JUMPI R2, R3
+   ```
+
+3. **Handle Edge Cases**
+   - Check for zero values
+   - Verify storage slots exist
+   - Handle maximum value overflows
+
+4. **Monitor Gas Limits**
+   ```asm
+   ; Check remaining gas
+   GAS R15
+   LOADI R14, 10000    ; Minimum required
+   LT R13, R15, R14    ; R13 = (gas < minimum)
+   LOADI R12, out_of_gas
+   JUMPI R13, R12      ; Abort if low gas
+   ```
+
+## Tools Reference
+
+### VM Tracer API
+
+```rust
+use minichain_vm::{Tracer, TraceStep};
+
+// Create tracer
+let mut tracer = Tracer::new(true);
+
+// Record step (done internally by VM)
+tracer.record(TraceStep {
+    pc: 0,
+    opcode: Opcode::LOADI,
+    gas_before: 1000000,
+    gas_after: 999998,
+    registers: [0; 16],
+});
+
+// Get all steps
+let steps = tracer.steps();
+
+// Print human-readable trace
+tracer.print_trace();
+```
+
+### LOG Opcode
+
+```asm
+LOG Rs    ; Emit value in register Rs
+```
+- Gas cost: **2**
+- Output available in `ExecutionResult.logs`
+- Useful for debugging during development
+- Remove before production deployment
+
+## Next Steps
+
+- Learn testing strategies in [Testing Guide](/guides/testing)
+- Explore advanced patterns in [Contract Examples](/smart-contracts/examples)
+- Reference all opcodes in [Opcode Reference](/vm/opcodes)
+- Understand gas costs in [Gas Metering](/vm/gas-metering)
+
+## Summary
+
+Effective debugging requires:
+
+✅ Understanding VM tracer output
+✅ Strategic use of LOG instructions
+✅ Monitoring gas consumption
+✅ Analyzing register state
+✅ Testing incrementally
+✅ Adding input validation
+
+With these tools and techniques, you can diagnose and fix issues in your smart contracts efficiently.

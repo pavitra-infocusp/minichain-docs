@@ -1,0 +1,446 @@
+---
+title: Calling Contracts
+description: Learn how to interact with deployed smart contracts on Minichain
+---
+
+Once a contract is deployed, you can interact with it by sending call transactions. This guide covers the complete process of calling contracts, passing data, and handling results.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Contract is deployed">
+    You need a deployed contract address. See [Deploying Contracts](/smart-contracts/deploying-contracts) if you haven't deployed yet.
+  </Step>
+  
+  <Step title="Have a funded account">
+    The caller account needs sufficient balance for gas fees (and any value being sent).
+  </Step>
+  
+  <Step title="Know the contract interface">
+    Understand what data the contract expects and how to format it.
+  </Step>
+</Steps>
+
+## Basic Contract Call
+
+### Using the CLI
+
+Call a deployed contract:
+
+```bash
+minichain call \
+  --from alice \
+  --to 0x9876543210fedcba9876543210fedcba98765432 \
+  --data "" \
+  --amount 0 \
+  --gas-price 1
+```
+
+<ParamField path="--from" type="string" required>
+  Caller account name (keypair file without `.json` extension)
+</ParamField>
+
+<ParamField path="--to" type="string" required>
+  Contract address (hex format with `0x` prefix)
+</ParamField>
+
+<ParamField path="--data" type="string" default="">
+  Calldata in hex format (without `0x` prefix)
+</ParamField>
+
+<ParamField path="--amount" type="number" default="0">
+  Amount of value to send with the call
+</ParamField>
+
+<ParamField path="--gas-price" type="number" default="1">
+  Price per unit of gas
+</ParamField>
+
+<ParamField path="--data-dir" type="string" default="./data">
+  Blockchain data directory
+</ParamField>
+
+### Call Output
+
+Successful call submission:
+
+```bash
+Calling contract...
+
+  Caller:    0x1234567890abcdef1234567890abcdef12345678
+  Contract:  0x9876543210fedcba9876543210fedcba98765432
+  Amount:    0
+  Data:      0 bytes
+  Nonce:     1
+  Balance:   999000
+
+✓ Transaction created
+    Hash: 0xdef567890abcdef567890abcdef567890abcdef567890abcdef567890abc
+
+✓ Contract call submitted
+
+Transaction will be included in the next block.
+Use minichain block produce to produce a block.
+```
+
+## Understanding Calldata
+
+### What is Calldata?
+
+Calldata is arbitrary data passed to the contract. The contract can access this data during execution, though Minichain's current VM doesn't expose calldata directly to contracts (a future enhancement).
+
+For now, contracts interact primarily through:
+- **Context** (`CALLER`, `CALLVALUE`, `ADDRESS`)
+- **Storage** (persistent state)
+- **Block info** (`BLOCKNUMBER`, `TIMESTAMP`)
+
+### Passing Data
+
+If your contract implementation reads calldata, format it as hex:
+
+```bash
+# Example: pass 32-byte value
+minichain call \
+  --from alice \
+  --to 0x9876... \
+  --data "000000000000000000000000000000000000000000000000000000000000002a"
+```
+
+<Tip>
+  The hex string should not include the `0x` prefix for the `--data` parameter.
+</Tip>
+
+## Contract Execution Context
+
+### Available Context
+
+Contracts can read execution context:
+
+```asm
+main:
+    ; Who is calling?
+    CALLER R0
+    LOG R0                  ; Print caller address
+    
+    ; How much value was sent?
+    CALLVALUE R1
+    LOG R1                  ; Print sent value
+    
+    ; What is my address?
+    ADDRESS R2
+    LOG R2                  ; Print contract address
+    
+    ; Block context
+    BLOCKNUMBER R3
+    TIMESTAMP R4
+    
+    HALT
+```
+
+### Sending Value
+
+Send value with a contract call:
+
+```bash
+minichain call \
+  --from alice \
+  --to 0x9876... \
+  --amount 1000
+```
+
+The contract can access the sent value:
+
+```asm
+main:
+    CALLVALUE R0            ; Get sent value
+    LOADI R1, 100
+    LT R2, R0, R1           ; Check if less than 100
+    LOADI R3, error
+    JUMPI R2, R3
+    REVERT                  ; Revert if too little
+
+error:
+    ; Process payment
+    HALT
+```
+
+<Warning>
+  If you send value to a contract, ensure the contract doesn't revert or the value is refunded (minus gas costs).
+</Warning>
+
+## Gas and Execution
+
+### Gas Calculation
+
+Call transaction gas estimation:
+
+```
+gas_limit = 21,000 + (calldata_bytes × 68) + execution_cost
+```
+
+- **21,000** - Base transaction cost
+- **68 per byte** - Calldata cost
+- **execution_cost** - Depends on instructions executed
+
+<Info>
+  The CLI automatically estimates gas limits. For programmatic calls, calculate gas based on expected execution.
+</Info>
+
+### Execution Limits
+
+Contract execution is bounded by:
+
+1. **Gas limit** - Transaction fails if execution exceeds gas
+2. **Memory limit** - 1MB maximum memory allocation
+3. **Instruction count** - Implicit limit via gas consumption
+
+### Reverting Transactions
+
+Contracts can revert using the `REVERT` instruction:
+
+```asm
+main:
+    CALLER R0
+    LOADI R1, 0x1234...     ; Expected caller
+    EQ R2, R0, R1
+    LOADI R3, authorized
+    JUMPI R2, R3
+    
+    REVERT                  ; Unauthorized - revert
+
+authorized:
+    ; Proceed with execution
+    HALT
+```
+
+When a contract reverts:
+- All state changes are rolled back
+- Gas used up to the revert is still consumed
+- Transaction fails with "Execution reverted" error
+
+## Programmatic Calls
+
+### Creating Call Transactions
+
+```rust
+use minichain_core::{Transaction, Keypair, Address};
+use minichain_storage::Storage;
+use minichain_chain::Blockchain;
+
+// Setup
+let keypair = load_keypair("alice")?;
+let from = keypair.address();
+let to = Address::from_hex("0x9876543210fedcba9876543210fedcba98765432")?;
+
+// Prepare calldata (empty for simple call)
+let data = vec![];
+
+// Get nonce
+let storage = Storage::open("./data")?;
+let state = minichain_storage::StateManager::new(&storage);
+let nonce = state.get_nonce(&from)?;
+
+// Create call transaction
+let amount = 0;
+let gas_limit = 100_000;
+let gas_price = 1;
+
+let tx = Transaction::call(
+    from,
+    to,
+    data,
+    amount,
+    nonce,
+    gas_limit,
+    gas_price,
+).signed(&keypair);
+
+// Submit transaction
+let mut blockchain = Blockchain::new(&storage, config);
+blockchain.submit_transaction(tx)?;
+```
+
+### Batch Calls
+
+Call multiple contracts in sequence:
+
+```rust
+let contracts = vec![
+    Address::from_hex("0xaaaa...")?,
+    Address::from_hex("0xbbbb...")?,
+    Address::from_hex("0xcccc...")?,
+];
+
+let mut nonce = state.get_nonce(&from)?;
+
+for contract_address in contracts {
+    let tx = Transaction::call(
+        from,
+        contract_address,
+        vec![],
+        0,
+        nonce,
+        50_000,
+        1,
+    ).signed(&keypair);
+    
+    blockchain.submit_transaction(tx)?;
+    nonce += 1;  // Increment nonce for next tx
+}
+```
+
+## Reading Results
+
+### Logs
+
+Contracts can emit values using the `LOG` instruction:
+
+```asm
+main:
+    LOADI R0, 0             ; Storage slot
+    SLOAD R1, R0            ; Load value
+    LOG R1                  ; Emit current value
+    
+    LOADI R2, 1
+    ADD R1, R1, R2          ; Increment
+    SSTORE R0, R1           ; Store
+    LOG R1                  ; Emit new value
+    HALT
+```
+
+Logs appear in execution results:
+
+```rust
+let result = vm.run()?;
+println!("Logs: {:?}", result.logs);
+// Logs: [42, 43]
+```
+
+### Storage Inspection
+
+Read contract storage after execution:
+
+```rust
+let state = StateManager::new(&storage);
+let value = state.get_storage(&contract_address, &slot)?;
+println!("Storage slot 0: {}", value);
+```
+
+### Return Data
+
+<Note>
+  Return data is not yet implemented in the current VM. Use `LOG` instructions to emit values during execution.
+</Note>
+
+## Example: Calling a Counter
+
+Given a counter contract:
+
+```asm counter.asm
+.entry main
+.const STORAGE_COUNTER 0
+
+main:
+    LOADI R0, STORAGE_COUNTER
+    SLOAD R1, R0            ; Load counter
+    LOADI R2, 1
+    ADD R1, R1, R2          ; Increment
+    SSTORE R0, R1           ; Store
+    LOG R1                  ; Emit new value
+    HALT
+```
+
+### Deploy the counter:
+
+```bash
+minichain deploy --from alice --source counter.asm --gas-limit 100000
+# Contract Address: 0x9876...
+
+minichain block produce --authority authority_0
+```
+
+### Call the counter:
+
+```bash
+# First call - counter goes from 0 to 1
+minichain call --from alice --to 0x9876...
+minichain block produce --authority authority_0
+
+# Second call - counter goes from 1 to 2
+minichain call --from alice --to 0x9876...
+minichain block produce --authority authority_0
+
+# Third call - counter goes from 2 to 3
+minichain call --from alice --to 0x9876...
+minichain block produce --authority authority_0
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Address is not a contract">
+    ```
+    Error: Address 0x1234... is not a contract
+    ```
+    
+    Ensure:
+    - The address is correct
+    - The contract was successfully deployed
+    - You produced a block after deployment
+  </Accordion>
+
+  <Accordion title="Out of gas">
+    ```
+    Error: Out of gas: required 50000, remaining 10000
+    ```
+    
+    Increase gas limit:
+    ```bash
+    minichain call --gas-limit 200000 ...
+    ```
+  </Accordion>
+
+  <Accordion title="Execution reverted">
+    ```
+    Error: Execution reverted
+    ```
+    
+    The contract called `REVERT`. Check:
+    - Contract's access control requirements
+    - Required value sent
+    - Contract state conditions
+  </Accordion>
+
+  <Accordion title="Insufficient balance">
+    ```
+    Error: Insufficient balance: have 1000, need 10000
+    ```
+    
+    Fund your account:
+    ```bash
+    minichain tx send --from faucet --to <your-address> --amount 100000
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<Check>**Check contract exists** - Verify the target is a contract before calling</Check>
+<Check>**Estimate gas** - Set gas limits with buffer for execution</Check>
+<Check>**Handle reverts** - Expect potential reverts and handle gracefully</Check>
+<Check>**Monitor logs** - Use LOG instructions to track contract execution</Check>
+<Check>**Test locally** - Test contract calls thoroughly before mainnet</Check>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Examples" icon="code" href="/smart-contracts/examples">
+    See complete contract examples with calls
+  </Card>
+  <Card title="VM Instructions" icon="book" href="/vm/instructions">
+    Full reference of all instructions
+  </Card>
+  <Card title="Gas Optimization" icon="gauge" href="/core-concepts/gas-system">
+    Optimize contract gas usage
+  </Card>
+</CardGroup>

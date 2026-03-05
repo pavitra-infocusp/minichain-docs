@@ -1,0 +1,200 @@
+---
+title: CLI Overview
+description: Complete guide to Minichain's command-line interface
+---
+
+The Minichain CLI provides a complete interface for interacting with your blockchain. From initializing a new chain to deploying smart contracts, all operations are available through intuitive commands.
+
+## Installation
+
+The CLI is built as part of the Minichain project:
+
+```bash
+# Clone the repository
+git clone https://github.com/jayendra-info/minichain.git
+cd minichain
+
+# Build the project
+cargo build --release
+
+# The CLI binary will be at target/release/minichain
+```
+
+You can run commands using:
+
+```bash
+cargo run --release -- <command>
+```
+
+Or directly via the binary:
+
+```bash
+./target/release/minichain <command>
+```
+
+## Command Structure
+
+All Minichain commands follow a consistent structure:
+
+```bash
+minichain [COMMAND] [SUBCOMMAND] [OPTIONS]
+```
+
+For example:
+- `minichain init --authorities 2`
+- `minichain account new --name alice`
+- `minichain block produce --authority authority_0`
+
+## Available Commands
+
+<CardGroup cols={2}>
+  <Card title="init" icon="flag" href="/cli/initialization">
+    Initialize a new blockchain with genesis block
+  </Card>
+  <Card title="account" icon="user" href="/cli/account-management">
+    Manage accounts, check balances, mint tokens
+  </Card>
+  <Card title="tx" icon="paper-plane" href="/cli/transactions">
+    Send transfer transactions
+  </Card>
+  <Card title="block" icon="cubes" href="/cli/block-production">
+    Produce blocks and query block information
+  </Card>
+  <Card title="deploy" icon="rocket" href="/cli/contract-operations">
+    Deploy smart contracts from assembly
+  </Card>
+  <Card title="call" icon="phone" href="/cli/contract-operations">
+    Execute contract functions
+  </Card>
+  <Card title="explore" icon="magnifying-glass" href="/cli/exploring">
+    Browse blockchain state and history
+  </Card>
+</CardGroup>
+
+## Quick Reference
+
+| Command | Description | Example |
+|---------|-------------|----------|
+| `init` | Initialize new blockchain | `minichain init --authorities 2` |
+| `account new` | Generate keypair | `minichain account new --name alice` |
+| `account mint` | Mint tokens (authority only) | `minichain account mint --from authority_0 --to 0xABC... --amount 50000` |
+| `account balance` | Query balance | `minichain account balance 0xABC...` |
+| `account info` | Show account details | `minichain account info 0xABC...` |
+| `account list` | List all keypairs | `minichain account list` |
+| `tx send` | Send transfer | `minichain tx send --from alice --to 0xABC... --amount 100` |
+| `block list` | List recent blocks | `minichain block list --count 10` |
+| `block info` | Show block details | `minichain block info 5` |
+| `block produce` | Produce new block | `minichain block produce --authority authority_0` |
+| `deploy` | Deploy contract | `minichain deploy --from alice --source contract.asm --gas-limit 80000` |
+| `call` | Call contract | `minichain call --from alice --to 0xABC...` |
+
+## Common Options
+
+Most commands support the following common options:
+
+### Data Directory
+
+```bash
+--data-dir <PATH>
+```
+
+Specifies where blockchain data is stored. Defaults to `./data`.
+
+**Example:**
+```bash
+minichain init --data-dir ./my-chain
+minichain account new --data-dir ./my-chain --name alice
+```
+
+### Help
+
+```bash
+--help
+```
+
+Shows detailed help for any command:
+
+```bash
+minichain --help
+minichain init --help
+minichain account --help
+```
+
+## Typical Workflow
+
+Here's a common sequence of operations:
+
+```bash
+# 1. Initialize blockchain
+minichain init --authorities 1
+
+# 2. Create user accounts
+minichain account new --name alice
+minichain account new --name bob
+
+# 3. Fund accounts (authority only)
+minichain account mint --from authority_0 --to <ALICE_ADDRESS> --amount 50000
+minichain account mint --from authority_0 --to <BOB_ADDRESS> --amount 50000
+
+# 4. Deploy a contract
+minichain deploy --from alice --source counter.asm --gas-limit 80000
+
+# 5. Produce a block to include the deployment
+minichain block produce --authority authority_0
+
+# 6. Call the contract
+minichain call --from alice --to <CONTRACT_ADDRESS>
+
+# 7. Produce another block
+minichain block produce --authority authority_0
+
+# 8. Explore the chain
+minichain block list
+minichain account info <CONTRACT_ADDRESS>
+```
+
+## Output Format
+
+The CLI uses colored output with symbols for visual clarity:
+
+- ✓ (green) - Success
+- ✗ (red) - Error
+- Yellow text - Addresses and hashes
+- Cyan text - Numeric values and commands
+- Gray text - Supplementary information
+
+<Note>
+If colors don't display correctly in your terminal, check that your terminal supports ANSI color codes.
+</Note>
+
+## Error Handling
+
+When commands fail, the CLI provides clear error messages:
+
+```bash
+$ minichain account balance 0xinvalid
+Error: Invalid address format: 0xinvalid
+
+$ minichain init
+Error: Chain already initialized. Use --force to reinitialize.
+
+$ minichain tx send --from alice --to 0xABC... --amount 1000000
+Error: Insufficient balance: have 50000, need 1021000 (amount 1000000 + gas 21000)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Initialize Blockchain" icon="flag" href="/cli/initialization">
+    Learn how to create a new blockchain
+  </Card>
+  <Card title="Manage Accounts" icon="user" href="/cli/account-management">
+    Create accounts and manage balances
+  </Card>
+  <Card title="Send Transactions" icon="paper-plane" href="/cli/transactions">
+    Transfer tokens between accounts
+  </Card>
+  <Card title="Deploy Contracts" icon="rocket" href="/cli/contract-operations">
+    Deploy and interact with smart contracts
+  </Card>
+</CardGroup>

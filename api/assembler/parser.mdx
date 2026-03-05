@@ -1,0 +1,484 @@
+---
+title: "Parser"
+description: "Parse assembly tokens into Abstract Syntax Tree (AST) for the Minichain assembler"
+---
+
+## Overview
+
+The parser module converts tokenized assembly code into a structured Abstract Syntax Tree (AST). It validates syntax, tracks labels, and builds a representation ready for bytecode compilation.
+
+## AST Types
+
+### Program
+
+The top-level AST structure representing a complete assembly program.
+
+```rust
+pub struct Program {
+    pub statements: Vec<Statement>,
+    pub entry_point: Option<String>,
+}
+```
+
+<ParamField path="statements" type="Vec<Statement>" required>
+  All statements in the program (labels, instructions, directives)
+</ParamField>
+
+<ParamField path="entry_point" type="Option<String>">
+  Optional entry point label specified by `.entry` directive
+</ParamField>
+
+### Statement
+
+A single statement in the assembly program.
+
+```rust
+pub enum Statement {
+    Label(String),
+    Instruction(Instruction),
+    Directive(Directive),
+}
+```
+
+<ParamField path="Label" type="String">
+  A label definition (e.g., `main:`)
+</ParamField>
+
+<ParamField path="Instruction" type="Instruction">
+  An executable instruction
+</ParamField>
+
+<ParamField path="Directive" type="Directive">
+  An assembler directive
+</ParamField>
+
+### Directive
+
+Assembler directives that control compilation.
+
+```rust
+pub enum Directive {
+    Entry(String),
+    Const(String, u64),
+}
+```
+
+<ParamField path="Entry" type="String">
+  Specifies the program entry point label
+</ParamField>
+
+<ParamField path="Const" type="(String, u64)">
+  Defines a named constant with a value
+</ParamField>
+
+### Instruction
+
+All supported assembly instructions organized by category.
+
+#### Control Flow Instructions
+
+```rust
+Instruction::Halt
+Instruction::Nop
+Instruction::Jump { target: u8 }
+Instruction::JumpI { cond: u8, target: u8 }
+Instruction::Call { target: u8 }
+Instruction::Ret
+Instruction::Revert
+```
+
+#### Arithmetic Instructions
+
+```rust
+Instruction::Add { dst: u8, s1: u8, s2: u8 }
+Instruction::Sub { dst: u8, s1: u8, s2: u8 }
+Instruction::Mul { dst: u8, s1: u8, s2: u8 }
+Instruction::Div { dst: u8, s1: u8, s2: u8 }
+Instruction::Mod { dst: u8, s1: u8, s2: u8 }
+Instruction::AddI { dst: u8, src: u8, imm: u64 }
+```
+
+#### Bitwise Instructions
+
+```rust
+Instruction::And { dst: u8, s1: u8, s2: u8 }
+Instruction::Or { dst: u8, s1: u8, s2: u8 }
+Instruction::Xor { dst: u8, s1: u8, s2: u8 }
+Instruction::Not { dst: u8, src: u8 }
+Instruction::Shl { dst: u8, s1: u8, s2: u8 }
+Instruction::Shr { dst: u8, s1: u8, s2: u8 }
+```
+
+#### Comparison Instructions
+
+```rust
+Instruction::Eq { dst: u8, s1: u8, s2: u8 }
+Instruction::Ne { dst: u8, s1: u8, s2: u8 }
+Instruction::Lt { dst: u8, s1: u8, s2: u8 }
+Instruction::Gt { dst: u8, s1: u8, s2: u8 }
+Instruction::Le { dst: u8, s1: u8, s2: u8 }
+Instruction::Ge { dst: u8, s1: u8, s2: u8 }
+Instruction::IsZero { dst: u8, src: u8 }
+```
+
+#### Memory Instructions
+
+```rust
+Instruction::Load8 { dst: u8, addr: u8 }
+Instruction::Load64 { dst: u8, addr: u8 }
+Instruction::Store8 { addr: u8, src: u8 }
+Instruction::Store64 { addr: u8, src: u8 }
+Instruction::MSize { dst: u8 }
+Instruction::MCopy { dst: u8, src: u8, len: u8 }
+```
+
+#### Storage Instructions
+
+```rust
+Instruction::SLoad { dst: u8, key: u8 }
+Instruction::SStore { key: u8, value: u8 }
+```
+
+#### Immediate Instructions
+
+```rust
+Instruction::LoadI { dst: u8, value: u64 }
+Instruction::LoadILabel { dst: u8, label: String }
+Instruction::Mov { dst: u8, src: u8 }
+```
+
+#### Context Instructions
+
+```rust
+Instruction::Caller { dst: u8 }
+Instruction::CallValue { dst: u8 }
+Instruction::Address { dst: u8 }
+Instruction::BlockNumber { dst: u8 }
+Instruction::Timestamp { dst: u8 }
+Instruction::Gas { dst: u8 }
+```
+
+#### Debug Instructions
+
+```rust
+Instruction::Log { src: u8 }
+```
+
+## Parser API
+
+### Parser::new
+
+```rust
+pub fn new(source: &'source str) -> Self
+```
+
+Creates a new parser for the given assembly source.
+
+<ParamField path="source" type="&str" required>
+  Assembly source code to parse
+</ParamField>
+
+<ResponseField name="Parser" type="Parser<'source>">
+  A new parser instance
+</ResponseField>
+
+### Parser::parse
+
+```rust
+pub fn parse(source: &'source str) -> Result<Program>
+```
+
+Parses assembly source into a complete program AST.
+
+<ParamField path="source" type="&str" required>
+  Assembly source code to parse
+</ParamField>
+
+<ResponseField name="Result" type="Result<Program>">
+  Successfully parsed program or parse error
+</ResponseField>
+
+### Instruction::byte_size
+
+```rust
+pub fn byte_size(&self) -> usize
+```
+
+Calculates the size of an instruction in bytes when compiled.
+
+<ResponseField name="size" type="usize">
+  Instruction size in bytes:
+  - No operands: 1 byte
+  - Single register: 2 bytes
+  - Two registers: 2 bytes
+  - Three registers: 3 bytes
+  - Register + immediate: 10 bytes (1 opcode + 1 register + 8 immediate)
+</ResponseField>
+
+## Error Types
+
+### ParseError
+
+```rust
+pub enum ParseError {
+    UnexpectedToken { expected: String, found: String, line: usize },
+    UnexpectedEof,
+    InvalidRegister { register: String, line: usize },
+    DuplicateLabel { label: String, line: usize, first_line: usize },
+}
+```
+
+<ParamField path="UnexpectedToken" type="Error">
+  Encountered an unexpected token during parsing. Includes expected token type, what was found, and line number.
+</ParamField>
+
+<ParamField path="UnexpectedEof" type="Error">
+  Reached end of input unexpectedly while parsing
+</ParamField>
+
+<ParamField path="InvalidRegister" type="Error">
+  Invalid register reference (not R0-R15)
+</ParamField>
+
+<ParamField path="DuplicateLabel" type="Error">
+  Label defined multiple times in the program
+</ParamField>
+
+## Usage Examples
+
+### Basic Parsing
+
+```rust
+use minichain_assembler::parser::Parser;
+
+let source = r#"
+LOADI R0, 10
+HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+assert_eq!(program.statements.len(), 2);
+```
+
+### Parsing with Labels
+
+```rust
+use minichain_assembler::parser::{Parser, Statement};
+
+let source = r#"
+main:
+    LOADI R0, 10
+    HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+
+// First statement is the label
+match &program.statements[0] {
+    Statement::Label(name) => assert_eq!(name, "main"),
+    _ => panic!("Expected label"),
+}
+```
+
+### Entry Point Directive
+
+```rust
+use minichain_assembler::parser::Parser;
+
+let source = r#"
+.entry main
+
+main:
+    LOADI R0, 42
+    HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+assert_eq!(program.entry_point, Some("main".to_string()));
+```
+
+### Constant Directive
+
+```rust
+use minichain_assembler::parser::{Parser, Statement, Directive};
+
+let source = r#"
+.const MAX_VALUE 100
+LOADI R0, MAX_VALUE
+"#;
+
+let program = Parser::parse(source).unwrap();
+
+match &program.statements[0] {
+    Statement::Directive(Directive::Const(name, value)) => {
+        assert_eq!(name, "MAX_VALUE");
+        assert_eq!(*value, 100);
+    }
+    _ => panic!("Expected const directive"),
+}
+```
+
+### Three-Register Instructions
+
+```rust
+use minichain_assembler::parser::{Parser, Statement, Instruction};
+
+let source = "ADD R2, R0, R1";
+let program = Parser::parse(source).unwrap();
+
+match &program.statements[0] {
+    Statement::Instruction(Instruction::Add { dst, s1, s2 }) => {
+        assert_eq!(*dst, 2);
+        assert_eq!(*s1, 0);
+        assert_eq!(*s2, 1);
+    }
+    _ => panic!("Expected ADD instruction"),
+}
+```
+
+### Label References
+
+```rust
+use minichain_assembler::parser::{Parser, Statement, Instruction};
+
+let source = "LOADI R5, loop_start";
+let program = Parser::parse(source).unwrap();
+
+match &program.statements[0] {
+    Statement::Instruction(Instruction::LoadILabel { dst, label }) => {
+        assert_eq!(*dst, 5);
+        assert_eq!(label, "loop_start");
+    }
+    _ => panic!("Expected LoadILabel"),
+}
+```
+
+### Instruction Byte Sizes
+
+```rust
+use minichain_assembler::parser::Instruction;
+
+// No operands: 1 byte
+assert_eq!(Instruction::Halt.byte_size(), 1);
+
+// Single register: 2 bytes
+assert_eq!(Instruction::Jump { target: 0 }.byte_size(), 2);
+
+// Two registers: 2 bytes
+assert_eq!(Instruction::Mov { dst: 0, src: 1 }.byte_size(), 2);
+
+// Three registers: 3 bytes
+assert_eq!(
+    Instruction::Add { dst: 0, s1: 1, s2: 2 }.byte_size(),
+    3
+);
+
+// Register + immediate: 10 bytes
+assert_eq!(
+    Instruction::LoadI { dst: 0, value: 100 }.byte_size(),
+    10
+);
+```
+
+### Error Handling
+
+```rust
+use minichain_assembler::parser::{Parser, ParseError};
+
+let source = "ADD R0";
+let result = Parser::parse(source);
+
+match result {
+    Err(ParseError::UnexpectedToken { expected, found, line }) => {
+        assert_eq!(line, 1);
+        println!("Expected: {}, Found: {}", expected, found);
+    }
+    _ => panic!("Expected parse error"),
+}
+```
+
+### Complete Program Example
+
+```rust
+use minichain_assembler::parser::Parser;
+
+let source = r#"
+.entry main
+.const ITERATIONS 10
+
+main:
+    LOADI R0, 0              ; counter
+    LOADI R1, ITERATIONS     ; max iterations
+    LOADI R5, loop_body
+
+loop_body:
+    ADDI R0, R0, 1           ; increment counter
+    LT R2, R0, R1            ; check if counter < max
+    LOADI R5, loop_body
+    JUMPI R2, R5             ; continue if true
+    HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+assert_eq!(program.entry_point, Some("main".to_string()));
+```
+
+## Parsing Workflow
+
+1. **Tokenization**: Source code is tokenized by the lexer
+2. **Statement Parsing**: Each statement is parsed into:
+   - Labels (identifier followed by colon)
+   - Instructions (opcodes with operands)
+   - Directives (starting with `.`)
+3. **Operand Validation**: Register numbers, immediate values, and labels are validated
+4. **Entry Point Tracking**: The `.entry` directive sets the program entry point
+5. **AST Construction**: All statements are collected into a `Program` structure
+
+## Instruction Syntax
+
+### No Operands
+```asm
+HALT
+NOP
+RET
+REVERT
+```
+
+### Single Register
+```asm
+JUMP R5
+CALL R3
+LOG R0
+```
+
+### Two Registers
+```asm
+MOV R0, R1
+NOT R2, R3
+LOAD8 R0, R5
+```
+
+### Three Registers
+```asm
+ADD R0, R1, R2
+MUL R3, R4, R5
+EQ R6, R7, R8
+```
+
+### Register + Immediate
+```asm
+LOADI R0, 42
+LOADI R1, 0xFF
+ADDI R2, R3, 10
+```
+
+### Register + Label
+```asm
+LOADI R5, loop_start
+LOADI R6, end_address
+```
+
+## Related
+
+- [Lexer](/api/assembler/lexer) - Tokenize assembly source
+- [Compiler](/api/assembler/compiler) - Compile AST to bytecode

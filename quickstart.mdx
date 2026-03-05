@@ -1,0 +1,358 @@
+---
+title: Quickstart
+description: Get a working blockchain running in 5 minutes — initialize a chain, create accounts, deploy a contract, and produce blocks
+---
+
+# Quickstart Guide
+
+This guide will walk you through setting up a complete blockchain in just a few minutes. You'll initialize a chain, create accounts, deploy a smart contract, and produce blocks.
+
+<Note>
+Make sure you've completed the [Installation](/installation) guide before proceeding.
+</Note>
+
+## Step-by-Step Tutorial
+
+<Steps>
+  <Step title="Initialize a Blockchain">
+    Create a new blockchain with one authority validator:
+    
+    ```bash
+    cargo run --release -- init --authorities 1
+    ```
+    
+    You'll see output like:
+    
+    ```
+    Initializing minichain...
+    
+    Generating authorities...
+      Authority 1: 0xf4a5e8c2b9d7f3a1...
+    
+    ✓  Created genesis block
+    ✓  Saved authority 1 keypair to: data/keys/authority_0.json
+    ✓  Saved config to: data/config.json
+    ```
+    
+    <Note>
+    If you need to reset the chain later, add the `--force` flag:
+    ```bash
+    cargo run --release -- init --force
+    ```
+    </Note>
+    
+    This creates:
+    - Genesis block (block #0)
+    - Authority keypair saved to `data/keys/authority_0.json`
+    - Configuration file at `data/config.json`
+    - Persistent blockchain database in `data/`
+  </Step>
+  
+  <Step title="Create User Accounts">
+    Generate keypairs for two users, Alice and Bob:
+    
+    ```bash
+    cargo run --release -- account new --name alice
+    cargo run --release -- account new --name bob
+    ```
+    
+    List all accounts:
+    
+    ```bash
+    cargo run --release -- account list
+    ```
+    
+    Each account gets:
+    - Ed25519 keypair for signing transactions
+    - Unique address derived from public key
+    - Saved to `data/keys/alice.json` and `data/keys/bob.json`
+  </Step>
+  
+  <Step title="Fund Accounts">
+    Only authorities can mint new tokens. Fund Alice so she can pay gas fees:
+    
+    ```bash
+    cargo run --release -- account mint --from authority_0 --to <ALICE_ADDRESS> --amount 50000
+    ```
+    
+    <Note>
+    Replace `<ALICE_ADDRESS>` with Alice's actual address from step 2.
+    </Note>
+    
+    Optionally fund Bob:
+    
+    ```bash
+    cargo run --release -- account mint --from authority_0 --to <BOB_ADDRESS> --amount 50000
+    ```
+  </Step>
+  
+  <Step title="Deploy a Smart Contract">
+    Create a simple counter contract that increments a storage value.
+    
+    Create `counter.asm`:
+    
+    ```asm
+    .entry main
+    
+    main:
+        LOADI R0, 0          ; storage slot 0 = counter
+        SLOAD R1, R0         ; load current value
+        LOADI R2, 1
+        ADD R1, R1, R2       ; increment
+        SSTORE R0, R1        ; save back
+        HALT
+    ```
+    
+    Deploy the contract:
+    
+    ```bash
+    cargo run --release -- deploy --from alice --source counter.asm --gas-limit 80000
+    ```
+    
+    You'll see:
+    
+    ```
+    Deploying contract...
+      Compiling: counter.asm
+    ✓  Compiled to 28 bytes
+    ✓  Contract deployment submitted
+      Contract Address: 0xa7b3c9e5d1f4a8c2...
+    ```
+    
+    <Warning>
+    Save the contract address! You'll need it to call the contract in the next step.
+    </Warning>
+    
+    The assembly is compiled to bytecode and added to the mempool, but not yet on-chain.
+  </Step>
+  
+  <Step title="Produce a Block">
+    The deployment transaction is in the mempool. Produce a block to include it:
+    
+    ```bash
+    cargo run --release -- block produce --authority authority_0
+    ```
+    
+    Output:
+    
+    ```
+    Producing new block...
+      Authority: 0xf4a5e8c2b9d7f3a1...
+    ✓  Block produced
+        Hash:   0x7d9f2a5c8e4b1f3a...
+        Height: 1
+        Txs:    1
+    ```
+    
+    The contract is now deployed on-chain!
+  </Step>
+  
+  <Step title="Call the Contract">
+    Execute the counter contract to increment the value:
+    
+    ```bash
+    cargo run --release -- call --from alice --to <CONTRACT_ADDRESS>
+    ```
+    
+    Replace `<CONTRACT_ADDRESS>` with the address from step 4.
+    
+    Produce another block to process the call:
+    
+    ```bash
+    cargo run --release -- block produce --authority authority_0
+    ```
+    
+    Call it again:
+    
+    ```bash
+    cargo run --release -- call --from alice --to <CONTRACT_ADDRESS>
+    cargo run --release -- block produce --authority authority_0
+    ```
+    
+    The counter storage slot now holds value `2` (incremented twice).
+  </Step>
+  
+  <Step title="Explore the Blockchain">
+    View recent blocks:
+    
+    ```bash
+    cargo run --release -- block list
+    ```
+    
+    Get details about a specific block:
+    
+    ```bash
+    cargo run --release -- block info 1
+    ```
+    
+    Check account balance:
+    
+    ```bash
+    cargo run --release -- account balance <ADDRESS>
+    ```
+    
+    View account details (including contract code):
+    
+    ```bash
+    cargo run --release -- account info <CONTRACT_ADDRESS>
+    ```
+  </Step>
+</Steps>
+
+## Understanding What Happened
+
+Let's break down the blockchain flow:
+
+### Transaction Lifecycle
+
+<CodeGroup>
+```bash "1. Submit Transaction"
+# Alice signs and submits a transaction
+cargo run --release -- call --from alice --to 0xCONTRACT...
+
+# Transaction enters mempool (pending)
+```
+
+```bash "2. Produce Block"
+# Authority collects transactions from mempool
+cargo run --release -- block produce --authority authority_0
+
+# Block is created, signed, and added to chain
+```
+
+```bash "3. Execute Transactions"
+# Each transaction in the block is executed:
+# 1. Validate signature
+# 2. Check nonce
+# 3. Deduct gas fees from sender
+# 4. Execute in VM
+# 5. Update state
+```
+</CodeGroup>
+
+### Virtual Machine Execution
+
+When the counter contract executes, the VM:
+
+1. **Loads bytecode** from contract storage
+2. **Initializes registers** R0-R15 to zero
+3. **Executes instructions** one by one:
+   - `LOADI R0, 0`: Load immediate value 0 into R0 (2 gas)
+   - `SLOAD R1, R0`: Read storage slot 0 into R1 (100 gas)
+   - `LOADI R2, 1`: Load immediate value 1 into R2 (2 gas)
+   - `ADD R1, R1, R2`: Add R1 + R2, store in R1 (2 gas)
+   - `SSTORE R0, R1`: Write R1 to storage slot 0 (5,000-20,000 gas)
+   - `HALT`: Stop execution (0 gas)
+4. **Tracks gas** consumed at each step
+5. **Updates storage** atomically if successful
+
+<Note>
+Storage operations (`SLOAD`, `SSTORE`) are intentionally expensive to reflect the cost of disk I/O.
+</Note>
+
+### Gas Costs in Action
+
+The counter contract execution costs approximately:
+
+```
+LOADI R0, 0:     2 gas
+SLOAD R1, R0:    100 gas
+LOADI R2, 1:     2 gas
+ADD R1, R1, R2:  2 gas
+SSTORE R0, R1:   5,000 gas (first time) or 20,000 gas (setting new value)
+HALT:            0 gas
+
+Total: ~5,106 gas (or ~20,106 gas for new slots)
+```
+
+This is why we set `--gas-limit 80000` — plenty of headroom for the contract.
+
+## Common CLI Commands
+
+Here's a quick reference of the most useful commands:
+
+| Command | Description | Example |
+|---------|-------------|----------|
+| `init` | Initialize blockchain | `minichain init --authorities 2` |
+| `account new` | Generate keypair | `minichain account new --name alice` |
+| `account mint` | Mint tokens (authority) | `minichain account mint --from authority_0 --to 0xABC... --amount 50000` |
+| `account balance` | Check balance | `minichain account balance 0xABC...` |
+| `account info` | Account details | `minichain account info 0xABC...` |
+| `account list` | List all keypairs | `minichain account list` |
+| `tx send` | Transfer tokens | `minichain tx send --from alice --to bob --amount 100` |
+| `deploy` | Deploy contract | `minichain deploy --from alice --source contract.asm --gas-limit 80000` |
+| `call` | Call contract | `minichain call --from alice --to 0xABC... --data 00` |
+| `block produce` | Produce new block | `minichain block produce --authority authority_0` |
+| `block list` | List recent blocks | `minichain block list --count 10` |
+| `block info` | Block details | `minichain block info 5` |
+
+<Note>
+Run `minichain --help` or `minichain <command> --help` for detailed usage information.
+</Note>
+
+## Complete Example Workflow
+
+Here's a full example showing token transfers and contract interactions:
+
+```bash
+# 1. Initialize blockchain
+minichain init --authorities 1
+
+# 2. Create accounts
+minichain account new --name alice
+minichain account new --name bob
+
+# 3. Fund accounts
+minichain account mint --from authority_0 --to <ALICE_ADDRESS> --amount 50000
+minichain account mint --from authority_0 --to <BOB_ADDRESS> --amount 50000
+minichain block produce --authority authority_0
+
+# 4. Transfer tokens between users
+minichain tx send --from alice --to <BOB_ADDRESS> --amount 1000
+minichain block produce --authority authority_0
+
+# 5. Deploy counter contract
+minichain deploy --from alice --source counter.asm --gas-limit 80000
+minichain block produce --authority authority_0
+
+# 6. Call contract multiple times
+minichain call --from alice --to <CONTRACT_ADDRESS>
+minichain block produce --authority authority_0
+
+minichain call --from bob --to <CONTRACT_ADDRESS>
+minichain block produce --authority authority_0
+
+# 7. View blockchain state
+minichain block list
+minichain account balance <ALICE_ADDRESS>
+minichain account info <CONTRACT_ADDRESS>
+```
+
+The counter's storage slot 0 now holds value `2` (incremented twice).
+
+## Next Steps
+
+Now that you have a working blockchain:
+
+- **Learn More**: Dive into the [Core Concepts](/core-concepts/architecture) to understand the architecture
+- **Write Contracts**: Study the [Assembly Language](/smart-contracts/assembly-language) guide
+- **Explore the VM**: Read about the [Virtual Machine](/vm/overview) and gas metering
+- **Understand Consensus**: Learn how [Proof of Authority](/core-concepts/blocks-and-consensus) works
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/core-concepts/architecture">
+    Deep dive into blockchain primitives, transactions, and blocks
+  </Card>
+  
+  <Card title="Assembly Language" icon="code" href="/smart-contracts/assembly-language">
+    Write smart contracts in Minichain's assembly language
+  </Card>
+  
+  <Card title="Virtual Machine" icon="microchip" href="/vm/overview">
+    Understand the register-based VM and gas metering
+  </Card>
+  
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Complete command-line interface documentation
+  </Card>
+</CardGroup>

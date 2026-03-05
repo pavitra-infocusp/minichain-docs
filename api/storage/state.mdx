@@ -1,0 +1,578 @@
+---
+title: 'StateManager'
+description: 'World state management for accounts and contract storage'
+---
+
+## Overview
+
+The `StateManager` manages the blockchain world state, including:
+- Account balances and nonces
+- Contract deployment and bytecode storage
+- Contract storage slots (SLOAD/SSTORE)
+- State root computation
+
+## StateManager
+
+Manages all accounts and contract storage state.
+
+```rust
+pub struct StateManager<'a> {
+    storage: &'a Storage,
+}
+```
+
+### Constructor
+
+<ParamField path="StateManager::new" type="fn">
+  Creates a new StateManager wrapping the given storage.
+
+  ```rust
+  pub fn new(storage: &'a Storage) -> Self
+  ```
+
+  <ParamField path="storage" type="&'a Storage" required>
+    Reference to the underlying Storage instance
+  </ParamField>
+
+  **Example:**
+  ```rust
+  use minichain_storage::{Storage, StateManager};
+
+  let storage = Storage::open("./blockchain_data")?;
+  let state = StateManager::new(&storage);
+  ```
+</ParamField>
+
+## Account Operations
+
+<ParamField path="StateManager::put_account" type="fn">
+  Creates or updates an account.
+
+  ```rust
+  pub fn put_account(&self, address: &Address, account: &Account) -> Result<()>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Account address
+  </ParamField>
+
+  <ParamField path="account" type="&Account" required>
+    Account data to store
+  </ParamField>
+
+  **Example:**
+  ```rust
+  use minichain_core::{Address, Account};
+
+  let alice = Address([0xAA; 20]);
+  let account = Account::new_user(1000);
+  state.put_account(&alice, &account)?;
+  ```
+</ParamField>
+
+<ParamField path="StateManager::get_account" type="fn">
+  Gets an account, returning default (zero balance/nonce) if not found.
+
+  ```rust
+  pub fn get_account(&self, address: &Address) -> Result<Account>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Account address
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Account>">
+    Returns the account or a default account with zero balance and nonce
+  </ResponseField>
+
+  **Note:** In blockchains, every address implicitly exists with zero balance. You can send coins to any address without it being "created" first.
+
+  **Example:**
+  ```rust
+  let account = state.get_account(&alice)?;
+  println!("Balance: {}, Nonce: {}", account.balance, account.nonce);
+  ```
+</ParamField>
+
+<ParamField path="StateManager::account_exists" type="fn">
+  Checks if an account has been explicitly stored.
+
+  ```rust
+  pub fn account_exists(&self, address: &Address) -> Result<bool>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Account address to check
+  </ParamField>
+
+  **Example:**
+  ```rust
+  if state.account_exists(&alice)? {
+      println!("Alice has an explicit account entry");
+  }
+  ```
+</ParamField>
+
+## Balance Operations
+
+<ParamField path="StateManager::get_balance" type="fn">
+  Gets an account's balance.
+
+  ```rust
+  pub fn get_balance(&self, address: &Address) -> Result<u64>
+  ```
+
+  **Example:**
+  ```rust
+  let balance = state.get_balance(&alice)?;
+  println!("Alice has {} tokens", balance);
+  ```
+</ParamField>
+
+<ParamField path="StateManager::set_balance" type="fn">
+  Sets an account's balance directly.
+
+  ```rust
+  pub fn set_balance(&self, address: &Address, balance: u64) -> Result<()>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Account address
+  </ParamField>
+
+  <ParamField path="balance" type="u64" required>
+    New balance amount
+  </ParamField>
+
+  **Example:**
+  ```rust
+  // Set initial balance
+  state.set_balance(&alice, 1_000_000)?;
+  ```
+</ParamField>
+
+<ParamField path="StateManager::add_balance" type="fn">
+  Adds to an account's balance (saturating addition).
+
+  ```rust
+  pub fn add_balance(&self, address: &Address, amount: u64) -> Result<()>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Account address
+  </ParamField>
+
+  <ParamField path="amount" type="u64" required>
+    Amount to add
+  </ParamField>
+
+  **Example:**
+  ```rust
+  // Credit account
+  state.add_balance(&alice, 500)?;
+  ```
+</ParamField>
+
+<ParamField path="StateManager::sub_balance" type="fn">
+  Subtracts from an account's balance. Returns error if insufficient funds.
+
+  ```rust
+  pub fn sub_balance(&self, address: &Address, amount: u64) -> Result<()>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Account address
+  </ParamField>
+
+  <ParamField path="amount" type="u64" required>
+    Amount to subtract
+  </ParamField>
+
+  **Returns:** `Err(StorageError::InsufficientBalance)` if balance is too low.
+
+  **Example:**
+  ```rust
+  match state.sub_balance(&alice, 300) {
+      Ok(_) => println!("Debit successful"),
+      Err(StorageError::InsufficientBalance { address, required, available }) => {
+          println!("Insufficient: need {}, have {}", required, available);
+      }
+      Err(e) => return Err(e),
+  }
+  ```
+</ParamField>
+
+<ParamField path="StateManager::transfer" type="fn">
+  Transfers balance from one account to another.
+
+  ```rust
+  pub fn transfer(&self, from: &Address, to: &Address, amount: u64) -> Result<()>
+  ```
+
+  <ParamField path="from" type="&Address" required>
+    Source account
+  </ParamField>
+
+  <ParamField path="to" type="&Address" required>
+    Destination account
+  </ParamField>
+
+  <ParamField path="amount" type="u64" required>
+    Amount to transfer
+  </ParamField>
+
+  **Example:**
+  ```rust
+  // Transfer 100 tokens from Alice to Bob
+  let bob = Address([0xBB; 20]);
+  state.transfer(&alice, &bob, 100)?;
+  ```
+</ParamField>
+
+## Nonce Operations
+
+<ParamField path="StateManager::get_nonce" type="fn">
+  Gets an account's nonce (transaction counter).
+
+  ```rust
+  pub fn get_nonce(&self, address: &Address) -> Result<u64>
+  ```
+
+  **Example:**
+  ```rust
+  let nonce = state.get_nonce(&alice)?;
+  println!("Alice has sent {} transactions", nonce);
+  ```
+</ParamField>
+
+<ParamField path="StateManager::increment_nonce" type="fn">
+  Increments the nonce and returns the old value.
+
+  ```rust
+  pub fn increment_nonce(&self, address: &Address) -> Result<u64>
+  ```
+
+  <ResponseField name="Result" type="Result<u64>">
+    Returns the nonce value **before** incrementing
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  // Get current nonce and increment atomically
+  let current_nonce = state.increment_nonce(&alice)?;
+  println!("Transaction nonce: {}", current_nonce);
+  // Account now has nonce = current_nonce + 1
+  ```
+</ParamField>
+
+## Contract Code Storage
+
+<ParamField path="StateManager::put_code" type="fn">
+  Stores contract bytecode by its hash (enables deduplication).
+
+  ```rust
+  pub fn put_code(&self, code_hash: &Hash, code: &[u8]) -> Result<()>
+  ```
+
+  <ParamField path="code_hash" type="&Hash" required>
+    Hash of the bytecode
+  </ParamField>
+
+  <ParamField path="code" type="&[u8]" required>
+    Contract bytecode
+  </ParamField>
+
+  **Example:**
+  ```rust
+  use minichain_core::hash;
+
+  let bytecode = b"contract code here";
+  let code_hash = hash(bytecode);
+  state.put_code(&code_hash, bytecode)?;
+  ```
+</ParamField>
+
+<ParamField path="StateManager::get_code" type="fn">
+  Retrieves contract bytecode by its hash.
+
+  ```rust
+  pub fn get_code(&self, code_hash: &Hash) -> Result<Option<Vec<u8>>>
+  ```
+
+  <ParamField path="code_hash" type="&Hash" required>
+    Hash of the bytecode to retrieve
+  </ParamField>
+
+  **Example:**
+  ```rust
+  if let Some(code) = state.get_code(&code_hash)? {
+      println!("Code length: {} bytes", code.len());
+  }
+  ```
+</ParamField>
+
+<ParamField path="StateManager::deploy_contract" type="fn">
+  Deploys a contract: stores code and creates contract account.
+
+  ```rust
+  pub fn deploy_contract(
+      &self,
+      address: &Address,
+      code: &[u8],
+      initial_balance: u64,
+  ) -> Result<Hash>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Contract deployment address
+  </ParamField>
+
+  <ParamField path="code" type="&[u8]" required>
+    Contract bytecode
+  </ParamField>
+
+  <ParamField path="initial_balance" type="u64" required>
+    Initial balance for the contract
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Hash>">
+    Returns the code hash
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  let contract_addr = Address([0xCC; 20]);
+  let bytecode = compile_contract("MyContract.sol")?;
+  let code_hash = state.deploy_contract(&contract_addr, &bytecode, 0)?;
+  
+  println!("Contract deployed at {:?}", contract_addr);
+  println!("Code hash: {:?}", code_hash);
+  ```
+</ParamField>
+
+<ParamField path="StateManager::get_code_for_address" type="fn">
+  Gets the code for a contract address.
+
+  ```rust
+  pub fn get_code_for_address(&self, address: &Address) -> Result<Option<Vec<u8>>>
+  ```
+
+  <ParamField path="address" type="&Address" required>
+    Contract address
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Option<Vec<u8>>>">
+    Returns None if the address is not a contract or has no code
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  match state.get_code_for_address(&contract_addr)? {
+      Some(code) => println!("Contract code: {} bytes", code.len()),
+      None => println!("Not a contract"),
+  }
+  ```
+</ParamField>
+
+## Contract Storage (SLOAD/SSTORE)
+
+<ParamField path="StateManager::sload" type="fn">
+  Reads a 32-byte slot from contract storage (EVM SLOAD equivalent).
+
+  ```rust
+  pub fn sload(&self, contract: &Address, slot: &StorageSlot) -> Result<[u8; 32]>
+  ```
+
+  <ParamField path="contract" type="&Address" required>
+    Contract address
+  </ParamField>
+
+  <ParamField path="slot" type="&StorageSlot" required>
+    Storage slot (32-byte key)
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<[u8; 32]>">
+    Returns the 32-byte value, or zeros if uninitialized
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  use minichain_storage::StorageSlot;
+
+  let slot: StorageSlot = [0u8; 32]; // Slot 0
+  let value = state.sload(&contract_addr, &slot)?;
+  println!("Slot 0 value: {:?}", value);
+  ```
+</ParamField>
+
+<ParamField path="StateManager::sstore" type="fn">
+  Writes a 32-byte value to contract storage (EVM SSTORE equivalent).
+
+  ```rust
+  pub fn sstore(&self, contract: &Address, slot: &StorageSlot, value: &[u8; 32]) -> Result<()>
+  ```
+
+  <ParamField path="contract" type="&Address" required>
+    Contract address
+  </ParamField>
+
+  <ParamField path="slot" type="&StorageSlot" required>
+    Storage slot (32-byte key)
+  </ParamField>
+
+  <ParamField path="value" type="&[u8; 32]" required>
+    Value to store (32 bytes)
+  </ParamField>
+
+  **Example:**
+  ```rust
+  let slot: StorageSlot = [0u8; 32];
+  let value: [u8; 32] = [0xFF; 32];
+  state.sstore(&contract_addr, &slot, &value)?;
+  ```
+</ParamField>
+
+<ParamField path="StateManager::storage_get" type="fn">
+  Reads raw bytes from contract storage.
+
+  ```rust
+  pub fn storage_get(&self, contract: &Address, key: &[u8]) -> Result<Option<Vec<u8>>>
+  ```
+
+  <ParamField path="contract" type="&Address" required>
+    Contract address
+  </ParamField>
+
+  <ParamField path="key" type="&[u8]" required>
+    Storage key (any length)
+  </ParamField>
+
+  **Example:**
+  ```rust
+  if let Some(data) = state.storage_get(&contract_addr, b"my_key")? {
+      println!("Found {} bytes", data.len());
+  }
+  ```
+</ParamField>
+
+<ParamField path="StateManager::storage_put" type="fn">
+  Writes raw bytes to contract storage.
+
+  ```rust
+  pub fn storage_put(&self, contract: &Address, key: &[u8], value: &[u8]) -> Result<()>
+  ```
+
+  <ParamField path="contract" type="&Address" required>
+    Contract address
+  </ParamField>
+
+  <ParamField path="key" type="&[u8]" required>
+    Storage key
+  </ParamField>
+
+  <ParamField path="value" type="&[u8]" required>
+    Value to store
+  </ParamField>
+
+  **Example:**
+  ```rust
+  state.storage_put(&contract_addr, b"owner", alice.0.as_ref())?;
+  ```
+</ParamField>
+
+<ParamField path="StateManager::storage_delete" type="fn">
+  Deletes a key from contract storage.
+
+  ```rust
+  pub fn storage_delete(&self, contract: &Address, key: &[u8]) -> Result<()>
+  ```
+
+  **Example:**
+  ```rust
+  state.storage_delete(&contract_addr, b"temp_data")?;
+  ```
+</ParamField>
+
+## State Root Computation
+
+<ParamField path="StateManager::compute_state_root" type="fn">
+  Computes the state root from all accounts.
+
+  ```rust
+  pub fn compute_state_root(&self) -> Result<Hash>
+  ```
+
+  <ResponseField name="Result" type="Result<Hash>">
+    Returns a deterministic hash representing the entire state
+  </ResponseField>
+
+  **Note:** This is a naive O(n) implementation that iterates all accounts. Production systems use incremental structures like Merkle Patricia Tries.
+
+  **Example:**
+  ```rust
+  let state_root = state.compute_state_root()?;
+  println!("State root: {}", state_root);
+
+  // Same state = same root (deterministic)
+  let root2 = state.compute_state_root()?;
+  assert_eq!(state_root, root2);
+  ```
+</ParamField>
+
+## StorageSlot Type
+
+```rust
+pub type StorageSlot = [u8; 32];
+```
+
+Represents a 32-byte storage slot, compatible with EVM storage layout.
+
+## Complete Example
+
+```rust
+use minichain_storage::{Storage, StateManager, StorageSlot};
+use minichain_core::{Address, Account};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let storage = Storage::open("./blockchain_data")?;
+    let state = StateManager::new(&storage);
+
+    // Create accounts
+    let alice = Address([0xAA; 20]);
+    let bob = Address([0xBB; 20]);
+
+    // Set initial balances
+    state.set_balance(&alice, 1000)?;
+    state.set_balance(&bob, 500)?;
+
+    // Transfer
+    state.transfer(&alice, &bob, 100)?;
+    println!("Alice: {}", state.get_balance(&alice)?); // 900
+    println!("Bob: {}", state.get_balance(&bob)?);     // 600
+
+    // Deploy contract
+    let contract_addr = Address([0xCC; 20]);
+    let bytecode = b"contract bytecode";
+    let code_hash = state.deploy_contract(&contract_addr, bytecode, 0)?;
+    println!("Deployed contract: {:?}", code_hash);
+
+    // Contract storage
+    let slot: StorageSlot = [0u8; 32];
+    let value: [u8; 32] = [0x42; 32];
+    state.sstore(&contract_addr, &slot, &value)?;
+    
+    let loaded = state.sload(&contract_addr, &slot)?;
+    assert_eq!(loaded, value);
+
+    // Compute state root
+    let root = state.compute_state_root()?;
+    println!("State root: {:?}", root);
+
+    Ok(())
+}
+```
+
+## See Also
+
+- [Storage](/api/storage/database) - Low-level database operations
+- [ChainStore](/api/storage/chain) - Block storage and chain management

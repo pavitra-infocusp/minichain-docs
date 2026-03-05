@@ -1,0 +1,369 @@
+---
+title: Account
+description: Account state representation for the blockchain
+---
+
+The `account` module provides the `Account` type, which represents an account's state in the blockchain. Accounts can be either externally owned accounts (EOAs) or contract accounts.
+
+## Overview
+
+Minichain uses an account-based model similar to Ethereum. Each account has a nonce, balance, optional contract code, and storage state.
+
+## Types
+
+### Account
+
+```rust
+pub struct Account {
+    pub nonce: u64,
+    pub balance: u64,
+    pub code_hash: Option<Hash>,
+    pub storage_root: Hash,
+}
+```
+
+Represents an account in the blockchain state.
+
+<ParamField path="nonce" type="u64">
+  Transaction count / sequence number. Incremented with each transaction sent from this account.
+</ParamField>
+
+<ParamField path="balance" type="u64">
+  Account balance in the native token (smallest unit).
+</ParamField>
+
+<ParamField path="code_hash" type="Option<Hash>">
+  Hash of the contract bytecode. `None` for externally owned accounts (EOAs), `Some(hash)` for contract accounts.
+</ParamField>
+
+<ParamField path="storage_root" type="Hash">
+  Root hash of the account's storage trie. Used for contract state.
+</ParamField>
+
+#### Constructors
+
+<ResponseField name="new_user" type="fn(balance: u64) -> Self">
+  Creates a new externally owned account (EOA) with the given balance.
+  
+  ```rust
+  use minichain_core::Account;
+  
+  // Create a user account with 1000 tokens
+  let account = Account::new_user(1000);
+  assert!(account.is_eoa());
+  assert_eq!(account.balance, 1000);
+  assert_eq!(account.nonce, 0);
+  ```
+  
+  <ParamField path="balance" type="u64">
+    Initial balance for the account
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="new_contract" type="fn(code_hash: Hash) -> Self">
+  Creates a new contract account with the given code hash.
+  
+  ```rust
+  use minichain_core::{Account, hash::hash};
+  
+  // Create a contract account
+  let bytecode = vec![0x01, 0x02, 0x03];
+  let code_hash = hash(&bytecode);
+  let account = Account::new_contract(code_hash);
+  
+  assert!(account.is_contract());
+  assert_eq!(account.balance, 0);
+  assert_eq!(account.nonce, 0);
+  ```
+  
+  <ParamField path="code_hash" type="Hash">
+    Hash of the contract bytecode
+  </ParamField>
+</ResponseField>
+
+#### Methods
+
+<ResponseField name="is_contract" type="fn(&self) -> bool">
+  Checks if this is a contract account.
+  
+  ```rust
+  let contract = Account::new_contract(hash);
+  assert!(contract.is_contract());
+  ```
+</ResponseField>
+
+<ResponseField name="is_eoa" type="fn(&self) -> bool">
+  Checks if this is an externally owned account (EOA).
+  
+  ```rust
+  let user = Account::new_user(100);
+  assert!(user.is_eoa());
+  ```
+</ResponseField>
+
+<ResponseField name="increment_nonce" type="fn(&mut self)">
+  Increments the nonce by 1.
+  
+  Uses saturating addition to prevent overflow.
+  
+  ```rust
+  let mut account = Account::new_user(1000);
+  assert_eq!(account.nonce, 0);
+  
+  account.increment_nonce();
+  assert_eq!(account.nonce, 1);
+  
+  account.increment_nonce();
+  assert_eq!(account.nonce, 2);
+  ```
+</ResponseField>
+
+<ResponseField name="credit" type="fn(&mut self, amount: u64)">
+  Adds balance to the account.
+  
+  Uses saturating addition to prevent overflow.
+  
+  ```rust
+  let mut account = Account::new_user(100);
+  account.credit(50);
+  assert_eq!(account.balance, 150);
+  ```
+  
+  <ParamField path="amount" type="u64">
+    Amount to add to the balance
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="debit" type="fn(&mut self, amount: u64) -> bool">
+  Subtracts balance from the account.
+  
+  Returns `true` if successful, `false` if insufficient balance. The balance is only modified if the operation succeeds.
+  
+  ```rust
+  let mut account = Account::new_user(100);
+  
+  // Successful debit
+  assert!(account.debit(50));
+  assert_eq!(account.balance, 50);
+  
+  // Failed debit (insufficient balance)
+  assert!(!account.debit(100));
+  assert_eq!(account.balance, 50); // Balance unchanged
+  ```
+  
+  <ParamField path="amount" type="u64">
+    Amount to subtract from the balance
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="has_balance" type="fn(&self, amount: u64) -> bool">
+  Checks if the account has sufficient balance.
+  
+  ```rust
+  let account = Account::new_user(100);
+  assert!(account.has_balance(50));
+  assert!(account.has_balance(100));
+  assert!(!account.has_balance(101));
+  ```
+  
+  <ParamField path="amount" type="u64">
+    Amount to check against the balance
+  </ParamField>
+</ResponseField>
+
+#### Trait Implementations
+
+- **Debug, Clone, PartialEq, Eq**: Standard derivations
+- **Serialize, Deserialize**: Serde support
+- **Default**: Creates a user account with zero balance
+
+## Usage Examples
+
+### Creating User Accounts
+
+```rust
+use minichain_core::Account;
+
+// Create a new user account with initial balance
+let mut alice = Account::new_user(1000);
+assert!(alice.is_eoa());
+assert_eq!(alice.balance, 1000);
+assert_eq!(alice.nonce, 0);
+
+// Perform a transaction (increment nonce and deduct fee)
+alice.increment_nonce();
+assert!(alice.debit(21_000)); // Gas cost
+assert_eq!(alice.nonce, 1);
+assert_eq!(alice.balance, 979_000);
+```
+
+### Creating Contract Accounts
+
+```rust
+use minichain_core::{Account, hash::hash};
+
+// Compile contract bytecode (simplified)
+let bytecode = vec![0x60, 0x80, 0x60, 0x40];
+let code_hash = hash(&bytecode);
+
+// Create contract account
+let contract = Account::new_contract(code_hash);
+assert!(contract.is_contract());
+assert_eq!(contract.code_hash, Some(code_hash));
+```
+
+### Balance Operations
+
+```rust
+use minichain_core::Account;
+
+let mut account = Account::new_user(1000);
+
+// Check balance before operation
+if account.has_balance(100) {
+    // Debit (e.g., for transaction value + gas)
+    assert!(account.debit(100));
+    println!("Transaction sent");
+}
+
+// Credit (e.g., receiving payment)
+account.credit(500);
+assert_eq!(account.balance, 1400);
+```
+
+### Nonce Management
+
+```rust
+use minichain_core::Account;
+
+let mut account = Account::new_user(10000);
+
+// Submit transactions
+for i in 0..5 {
+    assert_eq!(account.nonce, i);
+    
+    // Sign and submit transaction...
+    
+    // After transaction is included in a block
+    account.increment_nonce();
+}
+
+assert_eq!(account.nonce, 5);
+```
+
+### Transfer Between Accounts
+
+```rust
+use minichain_core::Account;
+
+let mut sender = Account::new_user(1000);
+let mut receiver = Account::new_user(500);
+
+let transfer_amount = 200;
+let gas_cost = 21_000;
+let total_cost = transfer_amount + gas_cost;
+
+if sender.has_balance(total_cost) {
+    // Debit sender
+    sender.debit(total_cost);
+    sender.increment_nonce();
+    
+    // Credit receiver (only the transfer amount, not gas)
+    receiver.credit(transfer_amount);
+    
+    assert_eq!(sender.balance, 1000 - total_cost);
+    assert_eq!(receiver.balance, 500 + transfer_amount);
+}
+```
+
+### Contract Deployment Flow
+
+```rust
+use minichain_core::{Account, hash::hash};
+use minichain_core::crypto::Address;
+
+// Deployer account
+let mut deployer = Account::new_user(100_000);
+
+// Calculate deployment cost
+let bytecode = vec![/* contract bytecode */];
+let deployment_gas = 80_000u64;
+let gas_price = 1u64;
+let deployment_cost = deployment_gas * gas_price;
+
+if deployer.has_balance(deployment_cost) {
+    // Debit deployer
+    deployer.debit(deployment_cost);
+    deployer.increment_nonce();
+    
+    // Create contract account
+    let code_hash = hash(&bytecode);
+    let contract = Account::new_contract(code_hash);
+    
+    println!("Contract deployed with code hash: {}", code_hash.to_hex());
+}
+```
+
+### Account Type Checking
+
+```rust
+use minichain_core::{Account, hash::hash};
+
+fn process_account(account: &Account) {
+    if account.is_eoa() {
+        println!("Processing user account");
+        println!("  Balance: {}", account.balance);
+        println!("  Nonce: {}", account.nonce);
+    } else if account.is_contract() {
+        println!("Processing contract account");
+        println!("  Code hash: {:?}", account.code_hash);
+        println!("  Storage root: {}", account.storage_root);
+    }
+}
+
+let user = Account::new_user(1000);
+let contract = Account::new_contract(hash(b"code"));
+
+process_account(&user);
+process_account(&contract);
+```
+
+## Implementation Details
+
+### Account Model
+
+Minichain uses an account-based model (like Ethereum) rather than a UTXO model (like Bitcoin):
+
+- **State**: Each account has explicit state (nonce, balance, code, storage)
+- **Nonce**: Prevents transaction replay attacks
+- **Balance**: Directly tracked rather than calculated from outputs
+- **Contracts**: Can hold code and maintain persistent storage
+
+### Storage Considerations
+
+- **Nonce**: Used to ensure transaction ordering and prevent replay
+- **Balance**: 64-bit unsigned integer (max ~18.4 quintillion tokens)
+- **Code Hash**: Only present for contract accounts
+- **Storage Root**: Merkle root of the account's storage trie
+
+### Safety Features
+
+- **Saturating Operations**: `credit` and `increment_nonce` use saturating arithmetic to prevent overflow
+- **Atomic Debit**: `debit` only modifies balance if sufficient funds exist
+- **Type Safety**: Separate constructors for EOAs and contracts
+
+### Default Account
+
+```rust
+impl Default for Account {
+    fn default() -> Self {
+        Self::new_user(0)
+    }
+}
+```
+
+The default account is an EOA with zero balance, useful for initialization.
+
+## Source Location
+
+Defined in `crates/core/src/account.rs`

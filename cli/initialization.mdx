@@ -1,0 +1,255 @@
+---
+title: Initialization
+description: Initialize a new Minichain blockchain with the init command
+---
+
+The `init` command creates a new blockchain with a genesis block and generates authority keypairs for block production.
+
+## Basic Usage
+
+```bash
+minichain init [OPTIONS]
+```
+
+## Quick Start
+
+Initialize a blockchain with default settings:
+
+```bash
+cargo run --release -- init
+```
+
+**Output:**
+```
+Initializing minichain...
+
+✓  Created data directory
+
+Generating authorities...
+  Authority 1: 0xf4a5e8c2b9d7f3a1...
+
+✓  Created genesis block
+    Hash: 0x7d9f2a5c8e4b1f3a...
+    Height: 0
+✓  Saved authority 1 keypair to: data/keys/authority_0.json
+✓  Saved config to: data/config.json
+
+Chain initialized successfully!
+
+Next steps:
+  • Use minichain account new to create accounts
+  • Use minichain tx send to send transactions
+  • Use minichain block list to explore blocks
+```
+
+## Options
+
+### Data Directory
+
+```bash
+--data-dir <PATH>
+```
+
+Specifies where to store blockchain data. Defaults to `./data`.
+
+**Example:**
+```bash
+minichain init --data-dir ./my-blockchain
+```
+
+This creates the following structure:
+```
+my-blockchain/
+├── keys/
+│   └── authority_0.json
+├── config.json
+└── sled/           # Database files
+```
+
+### Number of Authorities
+
+```bash
+--authorities <NUMBER>
+```
+
+Generates the specified number of authority keypairs for block production. Defaults to `1`.
+
+**Example:**
+```bash
+minichain init --authorities 3
+```
+
+**Output:**
+```
+Generating authorities...
+  Authority 1: 0xf4a5e8c2b9d7f3a1...
+  Authority 2: 0x3d8e9f2a6b4c1e7f...
+  Authority 3: 0x8a2c5d9e1f4b7a3c...
+
+✓  Saved authority 1 keypair to: data/keys/authority_0.json
+✓  Saved authority 2 keypair to: data/keys/authority_1.json
+✓  Saved authority 3 keypair to: data/keys/authority_2.json
+```
+
+<Info>
+With multiple authorities, block production rotates in round-robin order based on block height.
+</Info>
+
+### Block Time
+
+```bash
+--block-time <SECONDS>
+```
+
+Sets the target block production time in seconds. Defaults to `5`.
+
+**Example:**
+```bash
+minichain init --block-time 10
+```
+
+<Note>
+This is a target time for consensus validation. It doesn't enforce automatic block production—authorities must manually produce blocks using `minichain block produce`.
+</Note>
+
+### Force Reinitialization
+
+```bash
+--force
+```
+
+Deletes existing blockchain data and reinitializes from scratch.
+
+**Example:**
+```bash
+minichain init --force
+```
+
+**Output:**
+```
+Initializing minichain...
+
+✓  Removed existing data directory
+✓  Created data directory
+...
+```
+
+<Warning>
+This permanently deletes all blockchain data, including accounts, transactions, and blocks. Use with caution!
+</Warning>
+
+## Complete Example
+
+Initialize a 3-authority chain with custom settings:
+
+```bash
+minichain init \
+  --data-dir ./testnet \
+  --authorities 3 \
+  --block-time 2
+```
+
+## Genesis Block
+
+The init command creates a genesis block (block 0) with these properties:
+
+- **Height:** 0
+- **Previous Hash:** All zeros (`0x0000000000000000...`)
+- **Timestamp:** Current Unix timestamp
+- **Transactions:** Empty
+- **Authority:** First generated authority signs the block
+
+The genesis block is cryptographically signed and stored in the database.
+
+## Generated Files
+
+### Authority Keypairs
+
+Authority keypairs are saved as JSON files in `data/keys/`:
+
+```json
+{
+  "address": "0xf4a5e8c2b9d7f3a1e6b8c4d9f2a5e8c1",
+  "public_key": "e8c2b9d7f3a1e6b8c4d9f2a5e8c1f4a5...",
+  "private_key": "a1e6b8c4d9f2a5e8c1f4a5e8c2b9d7f3..."
+}
+```
+
+<Warning>
+Authority private keys grant permission to produce blocks. Store them securely and never commit to version control.
+</Warning>
+
+### Configuration File
+
+The blockchain configuration is saved to `data/config.json`:
+
+```json
+{
+  "authorities": [
+    "0xf4a5e8c2b9d7f3a1e6b8c4d9f2a5e8c1",
+    "0x3d8e9f2a6b4c1e7f8a2c5d9e1f4b7a3c"
+  ],
+  "block_time": 5,
+  "max_block_size": 1000
+}
+```
+
+This file is read by other commands to understand the blockchain configuration.
+
+## Proof of Authority Consensus
+
+Minichain uses Proof of Authority (PoA) consensus:
+
+- **Round-robin scheduling:** Authority selection is deterministic based on block height
+- **Formula:** `authority_index = height % authority_count`
+- **Signature validation:** Each block must be signed by the correct authority
+
+**Example with 3 authorities:**
+- Block 0: Authority 0
+- Block 1: Authority 1
+- Block 2: Authority 2
+- Block 3: Authority 0 (wraps around)
+- Block 4: Authority 1
+- ...
+
+<Info>
+See the [Consensus](/core-concepts/blocks-and-consensus) documentation for more details on PoA.
+</Info>
+
+## Common Errors
+
+### Already Initialized
+
+```bash
+$ minichain init
+Error: Chain already initialized. Use --force to reinitialize.
+```
+
+**Solution:** Add `--force` flag or use a different data directory.
+
+### Permission Denied
+
+```bash
+$ minichain init --data-dir /root/chain
+Error: Failed to create data directory: /root/chain
+```
+
+**Solution:** Use a directory where you have write permissions.
+
+## Next Steps
+
+After initialization:
+
+1. **Create user accounts** with `minichain account new`
+2. **Fund accounts** using `minichain account mint` (authority only)
+3. **Start transacting** with `minichain tx send`
+4. **Produce blocks** using `minichain block produce`
+
+<CardGroup cols={2}>
+  <Card title="Account Management" icon="user" href="/cli/account-management">
+    Create and manage accounts
+  </Card>
+  <Card title="Block Production" icon="cubes" href="/cli/block-production">
+    Learn how to produce blocks
+  </Card>
+</CardGroup>

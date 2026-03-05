@@ -1,0 +1,331 @@
+---
+title: Complete Workflow
+description: End-to-end tutorial for using Minichain from initialization to deployment and execution
+---
+
+This guide walks through a complete end-to-end workflow with Minichain, from initializing a blockchain to deploying and calling smart contracts.
+
+## What You'll Build
+
+By the end of this tutorial, you will:
+
+- Initialize a blockchain with Proof of Authority consensus
+- Create and fund user accounts
+- Deploy a smart contract written in assembly
+- Call the contract and produce blocks
+- Explore the blockchain state
+
+## Prerequisites
+
+Make sure you have:
+
+- Rust 1.70+ installed
+- The Minichain binary built (`cargo build --release`)
+- Basic understanding of blockchain concepts
+
+## Complete Workflow
+
+<Steps>
+
+1. **Initialize the Blockchain**
+
+   Create a new blockchain with one authority node:
+
+   ```bash
+   cargo run --release -- init --authorities 1
+   ```
+
+   **Output:**
+   ```
+   Initializing minichain...
+   
+   Generating authorities...
+     Authority 1: 0xf4a5e8c2b9d7f3a1...
+   
+   ✓  Created genesis block
+   ✓  Saved authority 1 keypair to: data/keys/authority_0.json
+   ✓  Saved config to: data/config.json
+   ```
+
+   This creates:
+   - A genesis block with height 0
+   - Authority keypairs in `data/keys/`
+   - Configuration file at `data/config.json`
+   - Blockchain database in `data/` directory
+
+   **Note:** If you need to reset an existing chain, add the `--force` flag:
+   ```bash
+   cargo run --release -- init --force
+   ```
+
+2. **Create User Accounts**
+
+   Generate keypairs for two users, Alice and Bob:
+
+   ```bash
+   cargo run --release -- account new --name alice
+   cargo run --release -- account new --name bob
+   ```
+
+   List all accounts to verify:
+   ```bash
+   cargo run --release -- account list
+   ```
+
+   Each account consists of:
+   - Ed25519 keypair (private/public keys)
+   - Derived address (Blake3 hash of public key)
+   - JSON file stored in `data/keys/`
+
+3. **Fund the Accounts**
+
+   Only authority accounts can mint new tokens. Fund Alice and Bob:
+
+   ```bash
+   # Fund Alice with 50,000 tokens
+   cargo run --release -- account mint \
+     --from authority_0 \
+     --to 0x3f8c2a6e9b5d1f4a... \
+     --amount 50000
+
+   # Fund Bob with 50,000 tokens
+   cargo run --release -- account mint \
+     --from authority_0 \
+     --to 0x7b2e5c9a4d8f3e1a... \
+     --amount 50000
+   ```
+
+   Replace the addresses with the actual addresses shown by `account list`.
+
+   Check Alice's balance:
+   ```bash
+   cargo run --release -- account balance 0x3f8c2a6e9b5d1f4a...
+   ```
+
+4. **Write a Smart Contract**
+
+   Create a simple counter contract that increments a storage value.
+
+   Save this as `counter.asm`:
+
+   ```asm
+   ; Counter contract - increments storage slot 0
+   .entry main
+
+   main:
+       LOADI R0, 0          ; storage slot 0 = counter
+       SLOAD R1, R0         ; load current value from storage
+       LOADI R2, 1          ; increment amount
+       ADD R1, R1, R2       ; increment counter
+       SSTORE R0, R1        ; save back to storage
+       HALT                 ; done
+   ```
+
+   **What it does:**
+   - Loads storage slot 0 into register R1
+   - Adds 1 to the counter
+   - Stores the new value back to slot 0
+   - Halts execution
+
+5. **Deploy the Contract**
+
+   Compile and deploy the contract using Alice's account:
+
+   ```bash
+   cargo run --release -- deploy \
+     --from alice \
+     --source counter.asm \
+     --gas-limit 80000
+   ```
+
+   **Output:**
+   ```
+   Deploying contract...
+   
+     Compiling: counter.asm
+   ✓  Compiled to 28 bytes
+   
+     Deployer:  0x3f8c2a6e9b5d1f4a...
+     Nonce:     0
+     Balance:   50000
+   
+   ✓  Transaction created
+       Hash: 0x7d9f2a5c8e4b1f3a...
+   
+   ✓  Contract deployment submitted
+   
+     Contract Address: 0xa7b3c9e5d1f4a8c2...
+   
+   Transaction will be included in the next block.
+   Use minichain block produce to produce a block.
+   ```
+
+   Save the contract address - you'll need it for calling the contract!
+
+6. **Produce a Block**
+
+   The transaction is now in the mempool. Produce a block to execute it:
+
+   ```bash
+   cargo run --release -- block produce --authority authority_0
+   ```
+
+   **Output:**
+   ```
+   Producing new block...
+     Authority: 0xf4a5e8c2b9d7f3a1...
+   ✓  Block produced
+       Hash:   0x2c8f4a9e7b3d5a1c...
+       Height: 1
+       Txs:    1
+   ```
+
+   The contract is now deployed and ready to use!
+
+7. **Call the Contract**
+
+   Call the counter contract to increment the value:
+
+   ```bash
+   cargo run --release -- call \
+     --from alice \
+     --to 0xa7b3c9e5d1f4a8c2...
+   ```
+
+   Produce a block to execute the call:
+   ```bash
+   cargo run --release -- block produce --authority authority_0
+   ```
+
+   Call it again from Bob's account:
+   ```bash
+   cargo run --release -- call \
+     --from bob \
+     --to 0xa7b3c9e5d1f4a8c2...
+   
+   cargo run --release -- block produce --authority authority_0
+   ```
+
+   The counter storage slot now holds the value `2` (incremented twice).
+
+8. **Explore the Blockchain**
+
+   **List recent blocks:**
+   ```bash
+   cargo run --release -- block list
+   ```
+
+   **View block details:**
+   ```bash
+   cargo run --release -- block info 1
+   ```
+
+   **Output:**
+   ```
+   Block #1
+   ========
+   
+   Hash:        0x2c8f4a9e7b3d5a1c...
+   Parent:      0x0000000000000000...
+   State Root:  0x8e4c2a9f7b5d3a1c...
+   Timestamp:   1678901234
+   Authority:   0xf4a5e8c2b9d7f3a1...
+   
+   Transactions: 1
+     - 0x7d9f2a5c8e4b1f3a... (Deploy)
+   ```
+
+   **Check contract account:**
+   ```bash
+   cargo run --release -- account info 0xa7b3c9e5d1f4a8c2...
+   ```
+
+   **Check Alice's updated balance:**
+   ```bash
+   cargo run --release -- account balance 0x3f8c2a6e9b5d1f4a...
+   ```
+
+   Notice that Alice's balance has decreased by the gas cost of deployment and execution.
+
+</Steps>
+
+## Transaction Flow Summary
+
+The complete transaction flow in Minichain:
+
+```
+┌──────────┐
+│   User   │
+└────┬─────┘
+     │ 1. Create & sign transaction
+     ↓
+┌──────────┐
+│   CLI    │
+└────┬─────┘
+     │ 2. Submit to blockchain
+     ↓
+┌──────────┐
+│ Mempool  │ ← Ordered by gas price
+└────┬─────┘
+     │ 3. Authority produces block
+     ↓
+┌──────────┐
+│ Executor │ ← Execute transactions
+└────┬─────┘
+     │ 4. Run bytecode
+     ↓
+┌──────────┐
+│    VM    │ ← Gas metering & execution
+└────┬─────┘
+     │ 5. Persist state changes
+     ↓
+┌──────────┐
+│ Storage  │ ← Atomic state updates
+└──────────┘
+```
+
+## Gas Costs Reference
+
+Key gas costs for the operations used:
+
+| Operation | Gas Cost | Description |
+|-----------|----------|-------------|
+| Transfer | 21,000 | Base transaction cost |
+| Deploy (per byte) | 200 | Contract deployment |
+| LOADI | 2 | Load immediate value |
+| ADD | 2 | Arithmetic operation |
+| SLOAD | 100 | Storage read |
+| SSTORE (set) | 20,000 | Storage write (new value) |
+| SSTORE (reset) | 5,000 | Storage write (existing slot) |
+| HALT | 0 | Stop execution |
+
+## Next Steps
+
+Now that you've completed a full workflow:
+
+- Learn to write more complex contracts in [Writing Your First Contract](/guides/writing-first-contract)
+- Master debugging techniques in [Debugging Contracts](/guides/debugging-contracts)
+- Understand testing patterns in [Testing Guide](/guides/testing)
+- Explore the [VM instruction set](/vm/opcodes)
+
+## Troubleshooting
+
+### Insufficient Balance Error
+
+If you see "Insufficient balance", make sure:
+- You've minted enough tokens to the account
+- The gas limit is not excessively high
+- You haven't already spent the tokens
+
+### Transaction Pending
+
+Remember that transactions must be included in a block:
+- Always run `block produce` after submitting transactions
+- Check the mempool with `block list` to see pending transactions
+
+### Contract Not Found
+
+If calling a contract fails:
+- Verify the contract address is correct
+- Ensure you've produced a block after deployment
+- Check that the address is a contract with `account info`

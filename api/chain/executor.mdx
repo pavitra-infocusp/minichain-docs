@@ -1,0 +1,337 @@
+---
+title: 'Executor'
+description: 'Block execution engine for processing transactions'
+---
+
+## Overview
+
+The `Executor` is responsible for executing transactions and blocks, managing state transitions, and generating execution receipts. It handles transfers, contract deployments, and contract calls with proper balance, nonce, and gas validation.
+
+## Executor
+
+Block execution engine that processes transactions and updates world state.
+
+### Constructor
+
+<ParamField path="new" type="fn">
+  Create a new executor.
+  
+  ```rust
+  pub fn new(state: &'a StateManager<'a>) -> Self
+  ```
+  
+  <ParamField path="state" type="&StateManager" required>
+    State manager for account operations
+  </ParamField>
+</ParamField>
+
+### Methods
+
+#### execute_transaction
+
+<ParamField path="execute_transaction" type="fn">
+  Execute a single transaction.
+  
+  This method:
+  1. Verifies the nonce matches the account's current nonce
+  2. Checks the sender has sufficient balance for value + gas
+  3. Increments the sender's nonce
+  4. Deducts max gas cost from sender
+  5. Executes the transaction (transfer, deploy, or call)
+  6. Refunds unused gas to sender
+  
+  ```rust
+  pub fn execute_transaction(&self, tx: &Transaction) -> Result<TransactionReceipt>
+  ```
+  
+  <ParamField path="tx" type="&Transaction" required>
+    The transaction to execute
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<TransactionReceipt>">
+    Returns a receipt with execution details, including success status, gas used, and any errors
+  </ResponseField>
+</ParamField>
+
+#### execute_block
+
+<ParamField path="execute_block" type="fn">
+  Execute all transactions in a block.
+  
+  Processes each transaction sequentially and aggregates the results into a block execution result.
+  
+  ```rust
+  pub fn execute_block(&self, block: &Block) -> Result<BlockExecutionResult>
+  ```
+  
+  <ParamField path="block" type="&Block" required>
+    The block to execute
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<BlockExecutionResult>">
+    Returns execution results for all transactions, total gas used, and new state root
+  </ResponseField>
+</ParamField>
+
+## TransactionReceipt
+
+Receipt for a single transaction execution.
+
+```rust
+pub struct TransactionReceipt {
+    pub tx_hash: Hash,
+    pub success: bool,
+    pub gas_used: u64,
+    pub contract_address: Option<Address>,
+    pub error: Option<String>,
+}
+```
+
+<ResponseField name="tx_hash" type="Hash">
+  Hash of the executed transaction
+</ResponseField>
+
+<ResponseField name="success" type="bool">
+  Whether the transaction executed successfully
+</ResponseField>
+
+<ResponseField name="gas_used" type="u64">
+  Amount of gas consumed by the transaction
+</ResponseField>
+
+<ResponseField name="contract_address" type="Option<Address>">
+  Address of deployed contract (only for deployment transactions)
+</ResponseField>
+
+<ResponseField name="error" type="Option<String>">
+  Error message if execution failed
+</ResponseField>
+
+## BlockExecutionResult
+
+Result of executing an entire block.
+
+```rust
+pub struct BlockExecutionResult {
+    pub block_hash: Hash,
+    pub receipts: Vec<TransactionReceipt>,
+    pub total_gas_used: u64,
+    pub state_root: Hash,
+}
+```
+
+<ResponseField name="block_hash" type="Hash">
+  Hash of the executed block
+</ResponseField>
+
+<ResponseField name="receipts" type="Vec<TransactionReceipt>">
+  Receipts for all transactions in the block
+</ResponseField>
+
+<ResponseField name="total_gas_used" type="u64">
+  Total gas consumed by all transactions
+</ResponseField>
+
+<ResponseField name="state_root" type="Hash">
+  New state root after execution
+</ResponseField>
+
+## ExecutionError
+
+Errors that can occur during execution.
+
+```rust
+pub enum ExecutionError {
+    Storage(StorageError),
+    InsufficientBalance { required: u64, available: u64 },
+    InvalidNonce { expected: u64, got: u64 },
+    OutOfGas,
+    Reverted,
+    VmError(String),
+}
+```
+
+<ResponseField name="Storage" type="error">
+  Underlying storage error
+</ResponseField>
+
+<ResponseField name="InsufficientBalance" type="error">
+  Sender doesn't have enough balance for value + gas
+</ResponseField>
+
+<ResponseField name="InvalidNonce" type="error">
+  Transaction nonce doesn't match account nonce
+</ResponseField>
+
+<ResponseField name="OutOfGas" type="error">
+  Transaction ran out of gas during execution
+</ResponseField>
+
+<ResponseField name="Reverted" type="error">
+  Contract execution reverted
+</ResponseField>
+
+<ResponseField name="VmError" type="error">
+  VM execution error
+</ResponseField>
+
+## Transaction Types
+
+The executor handles three types of transactions:
+
+### Transfer
+
+Simple value transfer from one account to another.
+
+- **Gas cost**: 21,000 units
+- **Requirements**: Sender must have `value + (21,000 * gas_price)` balance
+- **Effect**: Transfers value from sender to recipient
+
+### Contract Deployment
+
+Deploys a new smart contract.
+
+- **Gas cost**: 32,000 base + 200 per bytecode byte
+- **Requirements**: Sender must have deployment value + gas cost
+- **Effect**: Creates new contract account with bytecode hash
+- **Returns**: Contract address in receipt
+
+### Contract Call
+
+Calls an existing smart contract.
+
+- **Gas cost**: 21,000 base + 68 per calldata byte
+- **Requirements**: Contract must exist and have code
+- **Effect**: Executes contract code (VM execution in full implementation)
+- **Returns**: Execution result
+
+## Usage Example
+
+```rust
+use minichain_chain::Executor;
+use minichain_core::{Transaction, Keypair, Address, Account};
+use minichain_storage::{Storage, StateManager};
+
+// Setup storage and state
+let storage = Storage::open_temporary().unwrap();
+let state = StateManager::new(&storage);
+
+// Create executor
+let executor = Executor::new(&state);
+
+// Setup accounts
+let keypair = Keypair::generate();
+let from = keypair.address();
+let to = Address::from_bytes([2u8; 20]);
+
+// Fund the sender
+state.put_account(&from, &Account::new_user(100_000)).unwrap();
+
+// Execute a transfer
+let tx = Transaction::transfer(from, to, 1000, 0, 1).signed(&keypair);
+let receipt = executor.execute_transaction(&tx).unwrap();
+
+if receipt.success {
+    println!("Transfer successful!");
+    println!("Gas used: {}", receipt.gas_used);
+} else {
+    println!("Transfer failed: {}", receipt.error.unwrap());
+}
+
+// Check balances after execution
+let sender_balance = state.get_balance(&from).unwrap();
+let recipient_balance = state.get_balance(&to).unwrap();
+
+println!("Sender balance: {}", sender_balance);
+println!("Recipient balance: {}", recipient_balance);
+
+// Execute a contract deployment
+let bytecode = vec![0x60, 0x80, 0x60, 0x40, 0x52];
+let deploy_tx = Transaction::deploy(from, bytecode, 1, 100_000, 1).signed(&keypair);
+let deploy_receipt = executor.execute_transaction(&deploy_tx).unwrap();
+
+if deploy_receipt.success {
+    let contract_addr = deploy_receipt.contract_address.unwrap();
+    println!("Contract deployed at: {:?}", contract_addr);
+    
+    // Verify contract exists
+    let contract = state.get_account(&contract_addr).unwrap();
+    assert!(contract.is_contract());
+}
+```
+
+## Block Execution Example
+
+```rust
+use minichain_chain::Executor;
+use minichain_core::{Block, Transaction, Hash, Keypair, Address, Account};
+use minichain_storage::{Storage, StateManager};
+
+// Setup
+let storage = Storage::open_temporary().unwrap();
+let state = StateManager::new(&storage);
+let executor = Executor::new(&state);
+
+// Create accounts
+let keypair1 = Keypair::generate();
+let keypair2 = Keypair::generate();
+let addr1 = keypair1.address();
+let addr2 = keypair2.address();
+
+state.put_account(&addr1, &Account::new_user(100_000)).unwrap();
+state.put_account(&addr2, &Account::new_user(100_000)).unwrap();
+
+// Create transactions
+let tx1 = Transaction::transfer(addr1, addr2, 1000, 0, 1).signed(&keypair1);
+let tx2 = Transaction::transfer(addr2, addr1, 500, 0, 1).signed(&keypair2);
+
+// Create block
+let block = Block::new(
+    1,
+    Hash::ZERO,
+    vec![tx1, tx2],
+    Hash::ZERO,
+    addr1
+);
+
+// Execute entire block
+let result = executor.execute_block(&block).unwrap();
+
+println!("Block executed: {:?}", result.block_hash);
+println!("Total gas used: {}", result.total_gas_used);
+println!("Transaction count: {}", result.receipts.len());
+
+for (i, receipt) in result.receipts.iter().enumerate() {
+    println!("Transaction {}: success={}, gas={}",
+        i, receipt.success, receipt.gas_used
+    );
+}
+```
+
+## Gas Calculation
+
+The executor uses simplified gas calculations:
+
+| Operation | Gas Cost |
+|-----------|----------|
+| Transfer | 21,000 |
+| Contract deployment base | 32,000 |
+| Deployment per byte | 200 |
+| Contract call base | 21,000 |
+| Call data per byte | 68 |
+
+In a production implementation, gas costs would be more granular and include costs for storage operations, computation, memory usage, etc.
+
+## Implementation Notes
+
+- Failed transactions still increment nonces and consume gas (as in Ethereum)
+- The executor validates nonces and balances before execution
+- Unused gas is refunded to the sender after execution
+- Contract deployments calculate the contract address deterministically from sender address and nonce
+- The current implementation has a simplified VM; a full implementation would integrate WASM or EVM
+
+## See Also
+
+- [Blockchain](/api/chain/blockchain) - Main blockchain orchestration
+- [StateManager](/api/storage/state) - Account state management
+- [Transaction](/api/core/transaction) - Transaction types and structure

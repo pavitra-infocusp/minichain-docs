@@ -1,0 +1,339 @@
+---
+title: Writing Your First Contract
+description: Learn to write smart contracts in Minichain assembly language
+---
+
+Learn how to write smart contracts in Minichain's assembly language, understand each instruction, and deploy your first working contract.
+
+## What is Minichain Assembly?
+
+Minichain uses a custom assembly language that compiles to bytecode for a register-based virtual machine with:
+
+- **16 registers** (R0-R15) for temporary values
+- **40+ opcodes** covering arithmetic, logic, memory, storage, and control flow
+- **Gas metering** on every operation
+- **Persistent storage** using SLOAD/SSTORE
+- **Human-readable syntax** with labels and directives
+
+## Your First Contract: A Simple Counter
+
+<Steps>
+
+1. **Understand the Requirements**
+
+   We'll build a counter contract that:
+   - Stores a counter value in storage slot 0
+   - Increments the counter by 1 each time it's called
+   - Uses minimal gas
+
+2. **Write the Assembly Code**
+
+   Create a file called `counter.asm`:
+
+   ```asm
+   ; Counter contract - increments storage slot 0
+   .entry main
+
+   main:
+       LOADI R0, 0          ; storage slot 0 = counter
+       SLOAD R1, R0         ; load current value from storage
+       LOADI R2, 1          ; increment amount
+       ADD R1, R1, R2       ; increment counter
+       SSTORE R0, R1        ; save back to storage
+       HALT                 ; done
+   ```
+
+3. **Understand Each Instruction**
+
+   Let's break down what each line does:
+
+   **Line 1: `.entry main`**
+   ```asm
+   .entry main
+   ```
+   - A **directive** that declares the entry point
+   - Execution starts at the `main` label
+   - Required for all contracts
+
+   **Line 2: `LOADI R0, 0`**
+   ```asm
+   LOADI R0, 0
+   ```
+   - **LOADI** = Load Immediate
+   - Loads the constant value `0` into register R0
+   - R0 now holds the storage slot number we want to access
+   - Gas cost: **2**
+
+   **Line 3: `SLOAD R1, R0`**
+   ```asm
+   SLOAD R1, R0
+   ```
+   - **SLOAD** = Storage Load
+   - Reads from the storage slot specified by R0 (slot 0)
+   - Stores the retrieved value in R1
+   - If slot is empty, returns 0
+   - Gas cost: **100**
+
+   **Line 4: `LOADI R2, 1`**
+   ```asm
+   LOADI R2, 1
+   ```
+   - Loads the constant `1` into register R2
+   - This is the increment amount
+   - Gas cost: **2**
+
+   **Line 5: `ADD R1, R1, R2`**
+   ```asm
+   ADD R1, R1, R2
+   ```
+   - **ADD** = Addition
+   - Adds R1 + R2, stores result in R1
+   - R1 now contains the incremented counter
+   - Gas cost: **2**
+
+   **Line 6: `SSTORE R0, R1`**
+   ```asm
+   SSTORE R0, R1
+   ```
+   - **SSTORE** = Storage Store
+   - Writes the value in R1 to the storage slot specified by R0
+   - Persists the new counter value
+   - Gas cost: **20,000** (first write) or **5,000** (subsequent writes)
+
+   **Line 7: `HALT`**
+   ```asm
+   HALT
+   ```
+   - Stops execution successfully
+   - Returns control to the VM
+   - Gas cost: **0**
+
+4. **Calculate Total Gas Cost**
+
+   **First call (storage slot empty):**
+   ```
+   LOADI:  2
+   SLOAD:  100
+   LOADI:  2
+   ADD:    2
+   SSTORE: 20,000 (new slot)
+   HALT:   0
+   ─────────────
+   Total:  20,106 gas
+   ```
+
+   **Subsequent calls:**
+   ```
+   LOADI:  2
+   SLOAD:  100
+   LOADI:  2
+   ADD:    2
+   SSTORE: 5,000 (reset existing)
+   HALT:   0
+   ─────────────
+   Total:  5,106 gas
+   ```
+
+   Always set gas-limit higher than expected: **80,000** provides safety margin.
+
+5. **Compile the Contract**
+
+   The assembly is automatically compiled during deployment, but you can verify it compiles correctly:
+
+   ```bash
+   # The deploy command compiles it for you
+   cargo run --release -- deploy \
+     --from alice \
+     --source counter.asm \
+     --gas-limit 80000
+   ```
+
+   The compiler performs:
+   - **Lexing**: Tokenizes the source code
+   - **Parsing**: Builds an Abstract Syntax Tree (AST)
+   - **Two-pass compilation**:
+     - Pass 1: Collect labels and constants
+     - Pass 2: Emit bytecode with resolved references
+
+6. **Deploy and Test**
+
+   Deploy the contract:
+   ```bash
+   cargo run --release -- deploy \
+     --from alice \
+     --source counter.asm \
+     --gas-limit 80000
+   
+   cargo run --release -- block produce --authority authority_0
+   ```
+
+   Call it multiple times:
+   ```bash
+   cargo run --release -- call --from alice --to 0xCONTRACT_ADDRESS
+   cargo run --release -- block produce --authority authority_0
+   
+   cargo run --release -- call --from alice --to 0xCONTRACT_ADDRESS
+   cargo run --release -- block produce --authority authority_0
+   ```
+
+   The counter increments each time!
+
+</Steps>
+
+## Adding Features: Counter with Custom Increment
+
+Let's enhance the contract to accept a custom increment amount via calldata:
+
+```asm
+; Counter with custom increment
+.entry main
+
+main:
+    ; Load counter from storage
+    LOADI R0, 0              ; storage slot for counter
+    SLOAD R1, R0             ; R1 = current counter
+    
+    ; Get increment amount (default to 1)
+    LOADI R2, 1              ; default increment
+    ; Note: Calldata reading would require additional opcodes
+    
+    ; Increment counter
+    ADD R1, R1, R2           ; R1 = counter + increment
+    
+    ; Save back to storage
+    SSTORE R0, R1            ; store new counter
+    
+    ; Log the new value for debugging
+    LOG R1                   ; emit log with counter value
+    
+    HALT
+```
+
+**New instruction:**
+- **LOG R1**: Emits a log event with the value in R1 (gas cost: 2)
+
+## Understanding Register Usage
+
+Registers are like temporary variables:
+
+```asm
+; Register allocation example
+LOADI R0, 100    ; R0 = 100
+LOADI R1, 200    ; R1 = 200
+ADD R2, R0, R1   ; R2 = R0 + R1 = 300
+MUL R3, R2, R0   ; R3 = R2 * R0 = 30000
+```
+
+Best practices:
+- Use R0-R7 for frequently accessed values
+- Reserve R14-R15 for temporary calculations
+- Document register usage with comments
+- Reuse registers when values are no longer needed
+
+## Common Patterns
+
+### Pattern: Conditional Logic
+
+```asm
+; If R0 < 10, set R1 = 1, else R1 = 0
+LOADI R2, 10
+LT R1, R0, R2         ; R1 = (R0 < R2) ? 1 : 0
+ISZERO R1             ; invert: R1 = (R1 == 0) ? 1 : 0
+```
+
+### Pattern: Loops (Using Labels)
+
+```asm
+; Count from 0 to 9
+LOADI R0, 0           ; counter
+LOADI R1, 10          ; limit
+
+loop:
+    LOG R0            ; print current value
+    LOADI R2, 1
+    ADD R0, R0, R2    ; increment
+    LT R3, R0, R1     ; R3 = (R0 < R1)
+    LOADI R4, loop    ; R4 = address of 'loop' label
+    JUMPI R3, R4      ; if R3 != 0, jump to loop
+    
+HALT
+```
+
+### Pattern: Storage Mapping
+
+```asm
+; Use different storage slots for different data
+LOADI R0, 0           ; slot 0 = counter
+LOADI R1, 1           ; slot 1 = total
+LOADI R2, 2           ; slot 2 = last_caller
+
+SLOAD R10, R0         ; load counter
+SLOAD R11, R1         ; load total
+```
+
+## Instruction Set Quick Reference
+
+### Arithmetic
+| Instruction | Description | Gas |
+|------------|-------------|-----|
+| `ADD Rd, Rs1, Rs2` | Rd = Rs1 + Rs2 | 2 |
+| `SUB Rd, Rs1, Rs2` | Rd = Rs1 - Rs2 | 2 |
+| `MUL Rd, Rs1, Rs2` | Rd = Rs1 × Rs2 | 2 |
+| `DIV Rd, Rs1, Rs2` | Rd = Rs1 ÷ Rs2 | 4 |
+| `MOD Rd, Rs1, Rs2` | Rd = Rs1 % Rs2 | 4 |
+
+### Comparison
+| Instruction | Description | Gas |
+|------------|-------------|-----|
+| `EQ Rd, Rs1, Rs2` | Rd = (Rs1 == Rs2) | 2 |
+| `LT Rd, Rs1, Rs2` | Rd = (Rs1 < Rs2) | 2 |
+| `GT Rd, Rs1, Rs2` | Rd = (Rs1 > Rs2) | 2 |
+| `ISZERO Rd` | Rd = (Rd == 0) | 2 |
+
+### Storage
+| Instruction | Description | Gas |
+|------------|-------------|-----|
+| `SLOAD Rd, Rkey` | Load from storage | 100 |
+| `SSTORE Rkey, Rval` | Write to storage | 5,000-20,000 |
+
+### Control Flow
+| Instruction | Description | Gas |
+|------------|-------------|-----|
+| `JUMP Rtarget` | Unconditional jump | 8 |
+| `JUMPI Rcond, Rtarget` | Jump if Rcond != 0 | 8 |
+| `HALT` | Stop execution (success) | 0 |
+| `REVERT` | Stop execution (failure) | 0 |
+
+### Immediates
+| Instruction | Description | Gas |
+|------------|-------------|-----|
+| `LOADI Rd, imm` | Load constant | 2 |
+| `MOV Rd, Rs` | Copy register | 2 |
+
+### Context
+| Instruction | Description | Gas |
+|------------|-------------|-----|
+| `CALLER Rd` | Get transaction sender | 2 |
+| `ADDRESS Rd` | Get contract address | 2 |
+| `CALLVALUE Rd` | Get transaction value | 2 |
+| `BLOCKNUMBER Rd` | Get block number | 2 |
+| `TIMESTAMP Rd` | Get block timestamp | 2 |
+| `GAS Rd` | Get remaining gas | 2 |
+
+## Next Steps
+
+Now that you can write basic contracts:
+
+- Learn debugging techniques in [Debugging Contracts](/guides/debugging-contracts)
+- Explore testing patterns in [Testing Guide](/guides/testing)
+- See more examples in [Contract Examples](/smart-contracts/examples)
+- Reference all opcodes in [Opcode Reference](/vm/opcodes)
+
+## Tips for Writing Efficient Contracts
+
+1. **Minimize storage operations** - SSTORE is expensive (5,000-20,000 gas)
+2. **Reuse registers** - Avoid loading the same constants multiple times
+3. **Use labels for code organization** - Makes assembly more readable
+4. **Add comments** - Explain what each section does
+5. **Test with gas limits** - Monitor actual gas usage
+6. **Use LOG for debugging** - Emit values during development

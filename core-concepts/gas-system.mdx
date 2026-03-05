@@ -1,0 +1,677 @@
+---
+title: Gas System
+description: Understanding gas metering, operation costs, and the economic model of Minichain
+---
+
+Minichain uses a **gas system** similar to Ethereum to prevent infinite loops and abuse. Every operation consumes gas, and transactions must specify a gas limit and gas price.
+
+## What is Gas?
+
+Gas is a measure of computational work required to execute operations. It serves several purposes:
+
+<CardGroup cols={2}>
+  <Card title="Prevent Infinite Loops" icon="infinity">
+    Programs must halt when gas runs out, preventing endless execution.
+  </Card>
+  <Card title="Fair Resource Allocation" icon="scale-balanced">
+    Users pay for the resources they consume, preventing spam.
+  </Card>
+  <Card title="Incentivize Efficiency" icon="gauge-high">
+    Developers optimize code to minimize gas costs.
+  </Card>
+  <Card title="Prioritize Transactions" icon="arrow-up-wide-short">
+    Higher gas prices get faster inclusion in blocks.
+  </Card>
+</CardGroup>
+
+## Gas Costs
+
+### Cost Tiers
+
+Minichain defines five gas cost tiers:
+
+```rust
+pub struct GasCosts;
+
+impl GasCosts {
+    // Tier 1: Very cheap (simple register operations)
+    pub const ZERO: u64 = 0;      // HALT, NOP
+    pub const BASE: u64 = 2;      // ADD, SUB, AND, OR, MOV
+
+    // Tier 2: Cheap (more complex ALU operations)
+    pub const LOW: u64 = 3;       // MUL, comparison ops
+
+    // Tier 3: Medium (division, shifts)
+    pub const MID: u64 = 5;       // DIV, MOD, SHL, SHR
+
+    // Tier 4: Memory operations
+    pub const MEMORY_READ: u64 = 3;
+    pub const MEMORY_WRITE: u64 = 3;
+    pub const MEMORY_GROW_PER_BYTE: u64 = 1;
+
+    // Tier 5: Storage (expensive!)
+    pub const SLOAD: u64 = 100;           // Read from storage
+    pub const SSTORE_SET: u64 = 20000;    // Write to empty slot
+    pub const SSTORE_RESET: u64 = 5000;   // Overwrite existing slot
+
+    // Control flow
+    pub const JUMP: u64 = 8;
+    pub const CALL: u64 = 700;
+}
+```
+
+### Complete Gas Table
+
+| Operation Category | Opcode | Gas Cost | Notes |
+|-------------------|--------|----------|-------|
+| **Control Flow** |
+| Halt | `HALT` | 0 | Stops execution |
+| No-op | `NOP` | 0 | Does nothing |
+| Jump | `JUMP` | 8 | Unconditional jump |
+| Conditional Jump | `JUMPI` | 8 | Jump if condition |
+| Call | `CALL` | 700 | Call another contract |
+| Return | `RET` | 8 | Return from call |
+| Revert | `REVERT` | 0 | Revert transaction |
+| **Arithmetic** |
+| Add/Sub | `ADD`, `SUB` | 2 | Basic arithmetic |
+| Multiply | `MUL` | 3 | Multiplication |
+| Divide | `DIV` | 5 | Division (more expensive) |
+| Modulo | `MOD` | 5 | Remainder operation |
+| Add Immediate | `ADDI` | 2 | Add constant |
+| **Bitwise** |
+| And/Or/Xor | `AND`, `OR`, `XOR` | 2 | Bitwise operations |
+| Not | `NOT` | 2 | Bitwise negation |
+| Shift Left/Right | `SHL`, `SHR` | 5 | Bit shifting |
+| **Comparison** |
+| Equal/Not Equal | `EQ`, `NE` | 3 | Equality checks |
+| Less/Greater Than | `LT`, `GT` | 3 | Comparisons |
+| Less/Greater Equal | `LE`, `GE` | 3 | Inclusive comparisons |
+| Is Zero | `ISZERO` | 3 | Check if zero |
+| **Memory (RAM)** |
+| Load 8-bit | `LOAD8` | 3 | Read byte from memory |
+| Load 64-bit | `LOAD64` | 3 | Read word from memory |
+| Store 8-bit | `STORE8` | 3 | Write byte to memory |
+| Store 64-bit | `STORE64` | 3 | Write word to memory |
+| Memory Size | `MSIZE` | 2 | Get memory size |
+| Memory Copy | `MCOPY` | 3 + size | Copy memory region |
+| **Storage (Disk)** |
+| Storage Load | `SLOAD` | 100 | Read from persistent storage |
+| Storage Store (new) | `SSTORE` | 20,000 | Write to empty slot |
+| Storage Store (update) | `SSTORE` | 5,000 | Overwrite existing slot |
+| **Immediate/Move** |
+| Load Immediate | `LOADI` | 2 | Load constant into register |
+| Move Register | `MOV` | 2 | Copy between registers |
+| **Context** |
+| Get Caller | `CALLER` | 2 | Get caller address |
+| Get Call Value | `CALLVALUE` | 2 | Get sent value |
+| Get Address | `ADDRESS` | 2 | Get contract address |
+| Get Block Number | `BLOCKNUMBER` | 2 | Get current block |
+| Get Timestamp | `TIMESTAMP` | 2 | Get block timestamp |
+| Get Gas | `GAS` | 2 | Get remaining gas |
+| **Debug** |
+| Log | `LOG` | 8 | Emit log event |
+
+<Warning>
+  Storage operations (`SLOAD`/`SSTORE`) are **100x more expensive** than memory operations! Use storage sparingly and prefer keeping data in memory during execution.
+</Warning>
+
+## Gas Metering
+
+### Gas Meter
+
+The `GasMeter` tracks gas consumption during execution:
+
+```rust
+pub struct GasMeter {
+    remaining: u64,
+    used: u64,
+}
+
+impl GasMeter {
+    pub fn new(limit: u64) -> Self {
+        Self {
+            remaining: limit,
+            used: 0,
+        }
+    }
+
+    /// Consume gas, returning error if insufficient.
+    pub fn consume(&mut self, amount: u64) -> Result<(), VmError> {
+        if self.remaining < amount {
+            return Err(VmError::OutOfGas {
+                required: amount,
+                remaining: self.remaining,
+            });
+        }
+        self.remaining -= amount;
+        self.used += amount;
+        Ok(())
+    }
+
+    pub fn remaining(&self) -> u64 {
+        self.remaining
+    }
+
+    pub fn used(&self) -> u64 {
+        self.used
+    }
+}
+```
+
+### Gas Consumption Flow
+
+Every opcode execution follows this pattern:
+
+```rust
+// 1. Decode opcode
+let opcode = Opcode::from_byte(bytecode[pc])?;
+
+// 2. Consume gas BEFORE execution
+let cost = match opcode {
+    Opcode::ADD => GasCosts::BASE,
+    Opcode::MUL => GasCosts::LOW,
+    Opcode::DIV => GasCosts::MID,
+    Opcode::SLOAD => GasCosts::SLOAD,
+    Opcode::SSTORE => {
+        // Dynamic cost based on storage state
+        if storage_slot_is_empty {
+            GasCosts::SSTORE_SET
+        } else {
+            GasCosts::SSTORE_RESET
+        }
+    }
+    _ => GasCosts::BASE,
+};
+gas_meter.consume(cost)?;
+
+// 3. Execute operation
+execute_opcode(opcode)?;
+
+// 4. Move to next instruction
+pc += opcode.instruction_size();
+```
+
+<Tip>
+  Gas is consumed **before** execution, not after. This prevents operations from executing if they would run out of gas mid-execution.
+</Tip>
+
+### Out of Gas Error
+
+When gas runs out, execution halts immediately:
+
+```rust
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum VmError {
+    #[error("Out of gas: required {required}, remaining {remaining}")]
+    OutOfGas { required: u64, remaining: u64 },
+    // ... other errors
+}
+
+// Example:
+// Trying to execute SLOAD (cost: 100) with only 50 gas remaining
+// Error: Out of gas: required 100, remaining 50
+```
+
+## Transaction Gas
+
+### Gas Limit and Gas Price
+
+Transactions specify two gas-related fields:
+
+```rust
+pub struct Transaction {
+    // ... other fields
+    /// Maximum gas to use.
+    pub gas_limit: u64,
+    /// Price per unit of gas.
+    pub gas_price: u64,
+    // ...
+}
+```
+
+**Gas Limit:**
+- Maximum gas the transaction can consume
+- Set by sender based on estimated execution cost
+- Unused gas is refunded
+- Minimum: 21,000 for simple transfers
+
+**Gas Price:**
+- Amount sender pays per unit of gas
+- Higher gas price = faster inclusion in blocks
+- Total cost = `gas_used * gas_price`
+
+### Transaction Cost Calculation
+
+```rust
+impl Transaction {
+    /// Calculate the maximum cost of this transaction.
+    pub fn max_cost(&self) -> u64 {
+        self.value
+            .saturating_add(self.gas_limit.saturating_mul(self.gas_price))
+    }
+}
+
+// Example:
+// value = 1000
+// gas_limit = 50000
+// gas_price = 2
+// max_cost = 1000 + (50000 * 2) = 101,000
+```
+
+**Pre-Execution Balance Check:**
+
+```rust
+// Sender must have enough for value + max gas cost
+let max_cost = tx.max_cost();
+if account.balance < max_cost {
+    return Err(ValidationError::InsufficientBalance {
+        required: max_cost,
+        available: account.balance,
+    });
+}
+```
+
+### Gas Refund Mechanism
+
+```rust
+// 1. Deduct max gas cost upfront
+let max_gas_cost = tx.gas_limit * tx.gas_price;
+account.debit(tx.value + max_gas_cost)?;
+
+// 2. Execute transaction
+let result = vm.execute(bytecode, tx.gas_limit)?;
+
+// 3. Refund unused gas
+let gas_used = result.gas_used;
+let gas_refund = (tx.gas_limit - gas_used) * tx.gas_price;
+account.credit(gas_refund);
+
+// 4. Charge only for gas actually used
+let actual_cost = tx.value + (gas_used * tx.gas_price);
+```
+
+<Note>
+  Unused gas is always refunded! If you set `gas_limit = 100,000` but only use 50,000 gas, you only pay for 50,000.
+</Note>
+
+## Base Transaction Costs
+
+### Transfer Cost
+
+Simple value transfers have a fixed cost:
+
+```rust
+// Base cost for a transfer transaction
+const BASE_TX_GAS: u64 = 21_000;
+
+let tx = Transaction::transfer(
+    from,
+    to,
+    amount,
+    nonce,
+    gas_price,
+);
+
+assert_eq!(tx.gas_limit, 21_000);
+```
+
+### Deployment Cost
+
+Contract deployments pay per byte of bytecode:
+
+```rust
+const DEPLOYMENT_GAS_PER_BYTE: u64 = 200;
+
+// Calculate deployment cost
+let bytecode_size = bytecode.len() as u64;
+let deployment_gas = bytecode_size * DEPLOYMENT_GAS_PER_BYTE;
+let total_gas = BASE_TX_GAS + deployment_gas;
+
+// Example: 100-byte contract
+// total_gas = 21,000 + (100 * 200) = 41,000
+```
+
+### Contract Call Cost
+
+Contract calls include base cost plus execution:
+
+```rust
+const BASE_CALL_GAS: u64 = 21_000;
+
+// Total cost = base + execution
+let total_gas = BASE_CALL_GAS + execution_gas;
+```
+
+## Memory Expansion Cost
+
+Growing memory incurs additional gas:
+
+```rust
+impl GasMeter {
+    /// Calculate gas for memory expansion.
+    pub fn memory_expansion_cost(current_size: usize, new_size: usize) -> u64 {
+        if new_size <= current_size {
+            return 0;
+        }
+        let expansion = (new_size - current_size) as u64;
+        expansion * GasCosts::MEMORY_GROW_PER_BYTE
+    }
+}
+
+// Example: Growing memory from 1024 to 2048 bytes
+let expansion_cost = GasMeter::memory_expansion_cost(1024, 2048);
+// expansion_cost = (2048 - 1024) * 1 = 1024 gas
+```
+
+## Storage vs Memory Cost Comparison
+
+Let's compare the costs of storage vs memory operations:
+
+<CodeGroup>
+```asm Storage Example
+; Write to storage (expensive)
+LOADI R0, 42
+LOADI R1, 0
+SSTORE R1, R0        ; Cost: 20,000 gas (new slot)
+
+; Read from storage
+LOADI R1, 0
+SLOAD R2, R1         ; Cost: 100 gas
+
+; Total: 20,100 gas
+```
+
+```asm Memory Example
+; Write to memory (cheap)
+LOADI R0, 42
+LOADI R1, 0
+STORE64 R1, R0       ; Cost: 3 gas
+
+; Read from memory
+LOADI R1, 0
+LOAD64 R2, R1        ; Cost: 3 gas
+
+; Total: 6 gas
+```
+</CodeGroup>
+
+**Cost Comparison:**
+
+| Operation | Storage | Memory | Ratio |
+|-----------|---------|--------|-------|
+| Write (new) | 20,000 | 3 | **6,667x** |
+| Write (update) | 5,000 | 3 | **1,667x** |
+| Read | 100 | 3 | **33x** |
+
+<Warning>
+  Storage is **1,667x to 6,667x more expensive** than memory! Only use storage for data that must persist between transactions.
+</Warning>
+
+## Real-World Examples
+
+### Example 1: Counter Contract
+
+Let's analyze the gas cost of a simple counter:
+
+```asm
+.entry main
+
+main:
+    LOADI R0, 0          ; Load slot 0          - 2 gas
+    SLOAD R1, R0         ; Read counter         - 100 gas
+    LOADI R2, 1          ; Load constant 1      - 2 gas
+    ADD R1, R1, R2       ; Increment            - 2 gas
+    SSTORE R0, R1        ; Save counter         - 5,000 gas (update)
+    HALT                 ; Stop                 - 0 gas
+
+; Total execution: ~5,106 gas
+; Plus base transaction cost: 21,000 gas
+; Total: ~26,106 gas
+```
+
+### Example 2: Complex Calculation
+
+Compare computing in memory vs storage:
+
+<Tabs>
+  <Tab title="In Memory (Efficient)">
+    ```asm
+    ; Calculate: (a + b) * (c - d)
+    ; All data in registers/memory
+    
+    LOADI R0, 10         ; a = 10           - 2 gas
+    LOADI R1, 20         ; b = 20           - 2 gas
+    LOADI R2, 5          ; c = 5            - 2 gas
+    LOADI R3, 3          ; d = 3            - 2 gas
+    
+    ADD R4, R0, R1       ; R4 = a + b       - 2 gas
+    SUB R5, R2, R3       ; R5 = c - d       - 2 gas
+    MUL R6, R4, R5       ; R6 = result      - 3 gas
+    
+    HALT                 ; Stop             - 0 gas
+    
+    ; Total: 15 gas
+    ```
+  </Tab>
+  
+  <Tab title="In Storage (Inefficient)">
+    ```asm
+    ; Same calculation but using storage
+    
+    LOADI R0, 0          ; slot 0           - 2 gas
+    LOADI R1, 10
+    SSTORE R0, R1        ; store a          - 20,000 gas
+    
+    LOADI R0, 1
+    LOADI R1, 20
+    SSTORE R0, R1        ; store b          - 20,000 gas
+    
+    LOADI R0, 0
+    SLOAD R1, R0         ; load a           - 100 gas
+    LOADI R0, 1
+    SLOAD R2, R0         ; load b           - 100 gas
+    ADD R3, R1, R2       ; add              - 2 gas
+    
+    ; ... continue pattern
+    
+    ; Total: ~60,000+ gas (4000x more expensive!)
+    ```
+  </Tab>
+</Tabs>
+
+### Example 3: Gas Limit Selection
+
+```rust
+// Estimate gas for contract call
+let estimated_gas = 30_000;
+
+// Add 20% buffer for safety
+let gas_limit = (estimated_gas as f64 * 1.2) as u64;
+
+// Create transaction
+let tx = Transaction::call(
+    from,
+    contract,
+    calldata,
+    0,
+    nonce,
+    gas_limit,  // 36,000
+    gas_price,
+);
+
+// If actual usage is 28,000:
+// - Gas used: 28,000
+// - Gas refunded: 36,000 - 28,000 = 8,000
+// - Final cost: 28,000 * gas_price
+```
+
+## Gas Optimization Strategies
+
+<AccordionGroup>
+  <Accordion title="1. Minimize Storage Operations">
+    **Bad:**
+    ```asm
+    ; Reading storage multiple times
+    LOADI R0, 0
+    SLOAD R1, R0        ; 100 gas
+    ; ... use R1
+    SLOAD R1, R0        ; 100 gas (redundant!)
+    ```
+    
+    **Good:**
+    ```asm
+    ; Read once, reuse register
+    LOADI R0, 0
+    SLOAD R1, R0        ; 100 gas
+    ; ... use R1 multiple times
+    ```
+  </Accordion>
+
+  <Accordion title="2. Use Registers for Temporary Data">
+    **Bad:**
+    ```asm
+    ; Using storage as scratch space
+    LOADI R0, 0
+    LOADI R1, 42
+    SSTORE R0, R1       ; 20,000 gas (wasteful!)
+    SLOAD R2, R0        ; 100 gas
+    ```
+    
+    **Good:**
+    ```asm
+    ; Use registers for temporary values
+    LOADI R1, 42        ; 2 gas
+    MOV R2, R1          ; 2 gas
+    ```
+  </Accordion>
+
+  <Accordion title="3. Batch Storage Updates">
+    **Bad:**
+    ```asm
+    ; Multiple small storage writes
+    SSTORE R0, R1       ; 5,000 gas
+    ; ... some computation
+    SSTORE R0, R2       ; 5,000 gas
+    ; ... more computation
+    SSTORE R0, R3       ; 5,000 gas
+    ; Total: 15,000 gas
+    ```
+    
+    **Good:**
+    ```asm
+    ; Compute final value, write once
+    ; ... all computation in registers
+    SSTORE R0, R3       ; 5,000 gas
+    ; Total: 5,000 gas
+    ```
+  </Accordion>
+
+  <Accordion title="4. Use Efficient Opcodes">
+    **Bad:**
+    ```asm
+    ; Inefficient: x / 2 using DIV
+    LOADI R1, 2
+    DIV R0, R0, R1      ; 5 gas
+    ```
+    
+    **Good:**
+    ```asm
+    ; Efficient: x / 2 using shift
+    LOADI R1, 1
+    SHR R0, R0, R1      ; 5 gas (same cost, but more idiomatic)
+    ```
+  </Accordion>
+
+  <Accordion title="5. Exit Early on Conditions">
+    **Bad:**
+    ```asm
+    ; Always do all work
+    ; ... expensive computation (1000 gas)
+    ; ... check condition
+    JUMPI end           ; Waste if condition false
+    ```
+    
+    **Good:**
+    ```asm
+    ; Check condition first
+    ; ... check condition
+    JUMPI end           ; Exit early
+    ; ... expensive computation (only if needed)
+    end:
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Gas Profiling
+
+Minichain provides execution traces to analyze gas usage:
+
+```rust
+// Enable tracing
+let mut vm = Vm::new_with_context(
+    bytecode,
+    gas_limit,
+    caller,
+    address,
+    value,
+    block_number,
+    timestamp,
+);
+
+let tracer = Tracer::new();
+vm.set_tracer(Some(tracer));
+
+// Execute
+let result = vm.execute()?;
+
+// Analyze trace
+let trace = vm.get_tracer().unwrap();
+for step in trace.steps() {
+    println!(
+        "PC: {:4} | Opcode: {:?} | Gas: {} | Remaining: {}",
+        step.pc,
+        step.opcode,
+        step.gas_cost,
+        step.gas_remaining,
+    );
+}
+
+println!("Total gas used: {}", result.gas_used);
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Set appropriate gas limits">
+    Add 20-30% buffer to estimated gas for safety.
+  </Step>
+  <Step title="Optimize storage access">
+    Minimize `SLOAD`/`SSTORE` operations. Use registers and memory.
+  </Step>
+  <Step title="Profile before deploying">
+    Use tracing to identify gas hotspots.
+  </Step>
+  <Step title="Consider gas price">
+    Higher gas price = faster inclusion, but higher cost.
+  </Step>
+  <Step title="Handle out-of-gas gracefully">
+    Check gas remaining before expensive operations.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Virtual Machine" icon="microchip" href="/vm/overview">
+    Learn how the VM executes opcodes
+  </Card>
+  <Card title="Writing Assembly" icon="code" href="/smart-contracts/writing-contracts">
+    Write gas-efficient smart contracts
+  </Card>
+  <Card title="Opcode Reference" icon="book" href="/vm/opcodes">
+    Complete opcode and gas cost reference
+  </Card>
+  <Card title="Transaction Types" icon="paper-plane" href="/core-concepts/accounts-and-transactions">
+    Understand transaction gas requirements
+  </Card>
+</CardGroup>

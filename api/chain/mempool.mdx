@@ -1,0 +1,414 @@
+---
+title: 'Mempool'
+description: 'Transaction pool for pending transactions'
+---
+
+## Overview
+
+The `Mempool` manages pending transactions waiting to be included in a block. It provides efficient storage, retrieval, and ordering of transactions with support for capacity limits and gas price prioritization.
+
+## Mempool
+
+Transaction mempool for managing pending transactions.
+
+### Constructor
+
+<ParamField path="new" type="fn">
+  Create a new mempool with default configuration.
+  
+  ```rust
+  pub fn new() -> Self
+  ```
+  
+  Default configuration:
+  - `max_transactions`: 10,000
+  - `max_per_account`: 100
+</ParamField>
+
+<ParamField path="with_config" type="fn">
+  Create a new mempool with custom configuration.
+  
+  ```rust
+  pub fn with_config(config: MempoolConfig) -> Self
+  ```
+  
+  <ParamField path="config" type="MempoolConfig" required>
+    Custom mempool configuration
+  </ParamField>
+</ParamField>
+
+### Query Methods
+
+#### len
+
+<ParamField path="len" type="fn">
+  Get the number of transactions in the mempool.
+  
+  ```rust
+  pub fn len(&self) -> usize
+  ```
+  
+  <ResponseField name="Result" type="usize">
+    Returns the total number of transactions
+  </ResponseField>
+</ParamField>
+
+#### is_empty
+
+<ParamField path="is_empty" type="fn">
+  Check if the mempool is empty.
+  
+  ```rust
+  pub fn is_empty(&self) -> bool
+  ```
+  
+  <ResponseField name="Result" type="bool">
+    Returns `true` if no transactions are present
+  </ResponseField>
+</ParamField>
+
+#### contains
+
+<ParamField path="contains" type="fn">
+  Check if a transaction is in the mempool.
+  
+  ```rust
+  pub fn contains(&self, tx_hash: &Hash) -> bool
+  ```
+  
+  <ParamField path="tx_hash" type="&Hash" required>
+    The hash of the transaction to check
+  </ParamField>
+  
+  <ResponseField name="Result" type="bool">
+    Returns `true` if the transaction exists in the mempool
+  </ResponseField>
+</ParamField>
+
+#### get
+
+<ParamField path="get" type="fn">
+  Get a transaction from the mempool.
+  
+  ```rust
+  pub fn get(&self, tx_hash: &Hash) -> Option<&Transaction>
+  ```
+  
+  <ParamField path="tx_hash" type="&Hash" required>
+    The hash of the transaction to retrieve
+  </ParamField>
+  
+  <ResponseField name="Result" type="Option<&Transaction>">
+    Returns the transaction if found, `None` otherwise
+  </ResponseField>
+</ParamField>
+
+### Modification Methods
+
+#### add
+
+<ParamField path="add" type="fn">
+  Add a transaction to the mempool.
+  
+  ```rust
+  pub fn add(&mut self, tx: Transaction) -> Result<()>
+  ```
+  
+  <ParamField path="tx" type="Transaction" required>
+    The transaction to add
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<()>">
+    Returns `Ok(())` on success, or:
+    - `MempoolError::DuplicateTransaction` if already exists
+    - `MempoolError::MempoolFull` if capacity exceeded
+  </ResponseField>
+</ParamField>
+
+#### remove
+
+<ParamField path="remove" type="fn">
+  Remove a transaction from the mempool.
+  
+  ```rust
+  pub fn remove(&mut self, tx_hash: &Hash) -> Result<Transaction>
+  ```
+  
+  <ParamField path="tx_hash" type="&Hash" required>
+    The hash of the transaction to remove
+  </ParamField>
+  
+  <ResponseField name="Result" type="Result<Transaction>">
+    Returns the removed transaction or `MempoolError::TransactionNotFound`
+  </ResponseField>
+</ParamField>
+
+#### remove_batch
+
+<ParamField path="remove_batch" type="fn">
+  Remove multiple transactions from the mempool.
+  
+  ```rust
+  pub fn remove_batch(&mut self, tx_hashes: &[Hash])
+  ```
+  
+  <ParamField path="tx_hashes" type="&[Hash]" required>
+    Array of transaction hashes to remove
+  </ParamField>
+</ParamField>
+
+#### clear
+
+<ParamField path="clear" type="fn">
+  Clear all transactions from the mempool.
+  
+  ```rust
+  pub fn clear(&mut self)
+  ```
+</ParamField>
+
+### Retrieval Methods
+
+#### get_by_sender
+
+<ParamField path="get_by_sender" type="fn">
+  Get all transactions from a specific sender.
+  
+  ```rust
+  pub fn get_by_sender(&self, sender: &Address) -> Vec<Transaction>
+  ```
+  
+  <ParamField path="sender" type="&Address" required>
+    The sender address
+  </ParamField>
+  
+  <ResponseField name="Result" type="Vec<Transaction>">
+    Returns all transactions from the sender
+  </ResponseField>
+</ParamField>
+
+#### get_next_for_sender
+
+<ParamField path="get_next_for_sender" type="fn">
+  Get the next transaction for a sender (lowest nonce).
+  
+  ```rust
+  pub fn get_next_for_sender(&self, sender: &Address) -> Option<Transaction>
+  ```
+  
+  <ParamField path="sender" type="&Address" required>
+    The sender address
+  </ParamField>
+  
+  <ResponseField name="Result" type="Option<Transaction>">
+    Returns the transaction with the lowest nonce for this sender
+  </ResponseField>
+</ParamField>
+
+#### get_by_gas_price
+
+<ParamField path="get_by_gas_price" type="fn">
+  Get transactions ordered by gas price (highest first).
+  
+  ```rust
+  pub fn get_by_gas_price(&self, limit: usize) -> Vec<Transaction>
+  ```
+  
+  <ParamField path="limit" type="usize" required>
+    Maximum number of transactions to return
+  </ParamField>
+  
+  <ResponseField name="Result" type="Vec<Transaction>">
+    Returns up to `limit` transactions, sorted by gas price descending
+  </ResponseField>
+</ParamField>
+
+#### get_pending
+
+<ParamField path="get_pending" type="fn">
+  Get pending transactions for block building.
+  
+  Returns transactions ordered by gas price. In a production implementation, this would validate nonces against current state and respect account dependencies.
+  
+  ```rust
+  pub fn get_pending(&self, limit: usize) -> Vec<Transaction>
+  ```
+  
+  <ParamField path="limit" type="usize" required>
+    Maximum number of transactions to return
+  </ParamField>
+  
+  <ResponseField name="Result" type="Vec<Transaction>">
+    Returns up to `limit` executable transactions
+  </ResponseField>
+</ParamField>
+
+#### get_all
+
+<ParamField path="get_all" type="fn">
+  Get all transactions in the mempool.
+  
+  ```rust
+  pub fn get_all(&self) -> Vec<Transaction>
+  ```
+  
+  <ResponseField name="Result" type="Vec<Transaction>">
+    Returns all transactions (unordered)
+  </ResponseField>
+</ParamField>
+
+#### stats
+
+<ParamField path="stats" type="fn">
+  Get mempool statistics.
+  
+  ```rust
+  pub fn stats(&self) -> MempoolStats
+  ```
+  
+  <ResponseField name="Result" type="MempoolStats">
+    Returns current mempool statistics
+  </ResponseField>
+</ParamField>
+
+## MempoolConfig
+
+Configuration for mempool behavior.
+
+```rust
+pub struct MempoolConfig {
+    pub max_transactions: usize,
+    pub max_per_account: usize,
+}
+```
+
+<ParamField path="max_transactions" type="usize">
+  Maximum total number of transactions in the mempool (default: 10,000)
+</ParamField>
+
+<ParamField path="max_per_account" type="usize">
+  Maximum transactions per account (default: 100)
+</ParamField>
+
+## MempoolStats
+
+Statistics about the current mempool state.
+
+```rust
+pub struct MempoolStats {
+    pub total_transactions: usize,
+    pub unique_senders: usize,
+    pub capacity: usize,
+}
+```
+
+<ResponseField name="total_transactions" type="usize">
+  Total number of transactions in the mempool
+</ResponseField>
+
+<ResponseField name="unique_senders" type="usize">
+  Number of unique sender addresses
+</ResponseField>
+
+<ResponseField name="capacity" type="usize">
+  Maximum capacity of the mempool
+</ResponseField>
+
+## MempoolError
+
+Errors that can occur during mempool operations.
+
+```rust
+pub enum MempoolError {
+    DuplicateTransaction,
+    MempoolFull(usize),
+    TransactionNotFound,
+}
+```
+
+<ResponseField name="DuplicateTransaction" type="error">
+  Transaction already exists in the mempool
+</ResponseField>
+
+<ResponseField name="MempoolFull" type="error">
+  Mempool has reached capacity limit
+</ResponseField>
+
+<ResponseField name="TransactionNotFound" type="error">
+  Transaction not found in mempool
+</ResponseField>
+
+## Usage Example
+
+```rust
+use minichain_chain::{Mempool, MempoolConfig};
+use minichain_core::{Transaction, Keypair, Address};
+
+// Create mempool with custom config
+let config = MempoolConfig {
+    max_transactions: 5000,
+    max_per_account: 50,
+};
+let mut mempool = Mempool::with_config(config);
+
+// Add transactions
+let keypair = Keypair::generate();
+let from = keypair.address();
+let to = Address::from_bytes([2u8; 20]);
+
+let tx1 = Transaction::transfer(from, to, 1000, 0, 10).signed(&keypair);
+let tx2 = Transaction::transfer(from, to, 2000, 1, 20).signed(&keypair);
+
+mempool.add(tx1).unwrap();
+mempool.add(tx2).unwrap();
+
+println!("Mempool size: {}", mempool.len());
+
+// Get transactions by gas price
+let top_txs = mempool.get_by_gas_price(10);
+println!("Top transaction has gas price: {}", top_txs[0].gas_price);
+
+// Get transactions for a specific sender
+let sender_txs = mempool.get_by_sender(&from);
+println!("Sender has {} pending transactions", sender_txs.len());
+
+// Get pending transactions for block building
+let pending = mempool.get_pending(100);
+println!("Got {} transactions for block", pending.len());
+
+// Check if transaction exists
+let tx_hash = tx1.hash();
+if mempool.contains(&tx_hash) {
+    println!("Transaction is in mempool");
+}
+
+// Remove transaction
+mempool.remove(&tx_hash).unwrap();
+
+// Get statistics
+let stats = mempool.stats();
+println!("Total: {}, Senders: {}, Capacity: {}",
+    stats.total_transactions,
+    stats.unique_senders,
+    stats.capacity
+);
+
+// Clear all transactions
+mempool.clear();
+assert!(mempool.is_empty());
+```
+
+## Implementation Details
+
+The mempool uses multiple data structures for efficient operations:
+
+- **HashMap by hash**: O(1) transaction lookup by hash
+- **HashMap by sender**: O(1) sender transaction retrieval
+- **HashSet**: O(1) existence checks
+- **VecDeque per sender**: Preserves transaction order by nonce
+
+## See Also
+
+- [Blockchain](/api/chain/blockchain) - Main blockchain orchestration
+- [Transaction](/api/core/transaction) - Transaction structure and creation
+- [Executor](/api/chain/executor) - Transaction execution

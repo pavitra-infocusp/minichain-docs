@@ -1,0 +1,372 @@
+---
+title: Registers and Memory
+description: Understanding the VM's register file and memory model
+---
+
+The Minichain VM uses a **register-based architecture** with 16 general-purpose registers and linear memory.
+
+## Register File
+
+The VM has **16 registers** (R0-R15), each holding a 64-bit unsigned integer.
+
+### Register Structure
+
+From `crates/vm/src/memory.rs:7`:
+
+```rust
+pub const NUM_REGISTERS: usize = 16;
+
+pub struct Registers {
+    values: [u64; NUM_REGISTERS],
+}
+```
+
+All registers are:
+- **General-purpose**: No special-purpose registers (unlike some architectures with stack pointers, frame pointers, etc.)
+- **64-bit**: Each register stores a 64-bit unsigned integer
+- **Zero-initialized**: All registers start at 0
+
+### Register Operations
+
+<CodeGroup>
+```rust Reading Registers
+// Get value from register R5
+let value = registers.get(5);
+```
+
+```rust Writing Registers
+// Set R3 to 42
+registers.set(3, 42);
+```
+
+```rust Register Bounds
+// Register index is automatically wrapped
+// R16 wraps to R0, R17 to R1, etc.
+let value = registers.get(16);  // Same as get(0)
+```
+</CodeGroup>
+
+### Register Naming
+
+| Register | Number | Usage |
+|----------|--------|-------|
+| R0       | 0      | General purpose |
+| R1       | 1      | General purpose |
+| R2       | 2      | General purpose |
+| ...      | ...    | ... |
+| R15      | 15     | General purpose |
+
+<Note>
+Unlike some architectures, Minichain has no calling conventions or reserved registers. All 16 registers are available for any purpose.
+</Note>
+
+## Memory Model
+
+The VM has two distinct memory spaces:
+
+<CardGroup cols={2}>
+  <Card title="RAM (Memory)" icon="microchip">
+    Temporary, fast, cheap
+  </Card>
+  <Card title="Storage (Persistent)" icon="database">
+    Permanent, slow, expensive
+  </Card>
+</CardGroup>
+
+### RAM (Volatile Memory)
+
+**Linear byte-addressable memory** that exists only during execution.
+
+#### Memory Structure
+
+From `crates/vm/src/memory.rs:37`:
+
+```rust
+pub struct Memory {
+    data: Vec<u8>,         // Dynamically allocated
+    max_size: usize,       // 1MB limit
+}
+```
+
+#### Memory Features
+
+- **Byte-addressable**: Access individual bytes or 64-bit words
+- **Dynamically allocated**: Grows as needed (up to max size)
+- **1MB maximum**: Default limit is 1,048,576 bytes
+- **Zero-initialized**: Unallocated memory reads as 0
+- **Volatile**: Cleared after execution completes
+
+#### Memory Operations
+
+<Tabs>
+  <Tab title="8-bit Operations">
+    ```rust
+    // Load single byte
+    LOAD8 R0, [R1]    // R0 = memory[R1]
+    
+    // Store single byte
+    STORE8 [R0], R1   // memory[R0] = R1 & 0xFF
+    ```
+    
+    Use for:
+    - Character data
+    - Boolean flags
+    - Small integers
+  </Tab>
+  
+  <Tab title="64-bit Operations">
+    ```rust
+    // Load 8 bytes (little-endian)
+    LOAD64 R0, [R1]   // R0 = memory[R1..R1+8]
+    
+    // Store 8 bytes (little-endian)
+    STORE64 [R0], R1  // memory[R0..R0+8] = R1
+    ```
+    
+    Use for:
+    - Pointers/addresses
+    - Large integers
+    - Efficient data access
+  </Tab>
+  
+  <Tab title="Memory Copy">
+    ```rust
+    // Copy memory region
+    MCOPY dest, src, length
+    
+    // Example: Copy 64 bytes
+    LOADI R0, 0x1000   // destination
+    LOADI R1, 0x2000   // source
+    LOADI R2, 64       // length
+    MCOPY R0, R1, R2
+    ```
+    
+    Use for:
+    - Moving data blocks
+    - Copying arrays
+    - Buffer operations
+  </Tab>
+</Tabs>
+
+#### Memory Example
+
+```rust
+// Store and load a value in memory
+let bytecode = vec![
+    // LOADI R0, 0x100      (memory address)
+    0x70, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    
+    // LOADI R1, 42         (value to store)
+    0x70, 0x10, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    
+    // STORE64 [R0], R1     (write to memory)
+    0x43, 0x01,
+    
+    // LOAD64 R2, [R0]      (read back from memory)
+    0x41, 0x20,
+    
+    // LOG R2               (should log 42)
+    0xF0, 0x20,
+    
+    // HALT
+    0x00,
+];
+```
+
+### Storage (Persistent Memory)
+
+**Key-value store** that persists across transactions.
+
+#### Storage Structure
+
+- **Keys**: 32-byte fixed-size keys (256 bits)
+- **Values**: 32-byte fixed-size values (256 bits)
+- **Persistent**: Data survives after execution ends
+- **Expensive**: SSTORE costs 5,000-20,000 gas
+
+#### Storage Interface
+
+From `crates/vm/src/executor.rs:558`:
+
+```rust
+pub trait StorageBackend {
+    /// Read 32 bytes from storage slot
+    fn sload(&self, key: &[u8; 32]) -> [u8; 32];
+    
+    /// Write 32 bytes to storage slot
+    fn sstore(&mut self, key: &[u8; 32], value: &[u8; 32]);
+}
+```
+
+#### Storage Operations
+
+<CodeGroup>
+```rust SLOAD (Read)
+// Read from storage
+LOADI R0, 5        // key = 5
+SLOAD R1, R0       // R1 = storage[5]
+```
+
+```rust SSTORE (Write)
+// Write to storage
+LOADI R0, 5        // key = 5
+LOADI R1, 100      // value = 100
+SSTORE R0, R1      // storage[5] = 100
+```
+</CodeGroup>
+
+#### Storage Gas Costs
+
+<Warning>
+Storage operations are expensive by design to prevent state bloat.
+</Warning>
+
+| Operation | Scenario | Gas Cost |
+|-----------|----------|----------|
+| SLOAD     | Always   | 100 gas  |
+| SSTORE    | New slot (zero → non-zero) | 20,000 gas |
+| SSTORE    | Update existing (non-zero → non-zero) | 5,000 gas |
+
+From `crates/vm/src/executor.rs:598`:
+
+```rust
+let cost = if let Some(storage) = &self.storage {
+    let current = storage.sload(&key);
+    let is_empty = current == [0u8; 32];
+    if is_empty {
+        GasCosts::SSTORE_SET     // 20,000 gas
+    } else {
+        GasCosts::SSTORE_RESET   // 5,000 gas
+    }
+} else {
+    GasCosts::SSTORE_SET
+};
+```
+
+## Memory vs Storage
+
+<Tabs>
+  <Tab title="When to Use RAM">
+    ✅ **Use RAM for**:
+    - Temporary calculations
+    - Loop variables
+    - Stack frames
+    - Buffer data
+    - Intermediate results
+    
+    **Advantages**:
+    - Fast (3 gas per operation)
+    - Byte-addressable
+    - No size restrictions on individual values
+    
+    **Disadvantages**:
+    - Volatile (lost after execution)
+    - Limited to 1MB
+  </Tab>
+  
+  <Tab title="When to Use Storage">
+    ✅ **Use Storage for**:
+    - User balances
+    - Contract state
+    - Ownership records
+    - Persistent configuration
+    - Cross-transaction data
+    
+    **Advantages**:
+    - Persistent across transactions
+    - Unlimited size (practically)
+    - Secure and tamper-proof
+    
+    **Disadvantages**:
+    - Very expensive (100-20,000 gas)
+    - Fixed 32-byte slots
+    - Slower access
+  </Tab>
+</Tabs>
+
+## Memory Safety
+
+The VM includes several safety mechanisms:
+
+### Overflow Protection
+
+From `crates/vm/src/memory.rs:62`:
+
+```rust
+if offset >= self.max_size {
+    return Err(VmError::MemoryOverflow);
+}
+```
+
+### Automatic Expansion
+
+```rust
+// Memory grows automatically when needed
+if offset >= self.data.len() {
+    self.data.resize(offset + 1, 0);
+}
+```
+
+### Zero Reads
+
+```rust
+// Reading uninitialized memory returns 0
+pub fn load8(&self, offset: u32) -> u8 {
+    self.data.get(offset as usize).copied().unwrap_or(0)
+}
+```
+
+## Examples
+
+### Example 1: Using Registers
+
+```rust
+// Swap two registers without a temporary
+LOADI R0, 10
+LOADI R1, 20
+XOR R0, R0, R1    // R0 = 10 ^ 20
+XOR R1, R1, R0    // R1 = 20 ^ (10 ^ 20) = 10
+XOR R0, R0, R1    // R0 = (10 ^ 20) ^ 10 = 20
+```
+
+### Example 2: Memory as Stack
+
+```rust
+// Implement a simple stack
+LOADI R15, 0x1000     // Stack pointer (SP)
+
+// Push 42
+LOADI R0, 42
+STORE64 [R15], R0
+ADDI R15, R15, 8
+
+// Push 99
+LOADI R0, 99
+STORE64 [R15], R0
+ADDI R15, R15, 8
+
+// Pop to R1
+ADDI R15, R15, -8
+LOAD64 R1, [R15]      // R1 = 99
+```
+
+### Example 3: Persistent Counter
+
+```rust
+// Increment a persistent counter
+LOADI R0, 0           // key = 0
+SLOAD R1, R0          // R1 = storage[0]
+ADDI R1, R1, 1        // R1++
+SSTORE R0, R1         // storage[0] = R1
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Opcodes" icon="list" href="/vm/opcodes">
+    Complete reference of all memory operations
+  </Card>
+  <Card title="Gas Metering" icon="gauge" href="/vm/gas-metering">
+    Understand memory and storage costs
+  </Card>
+</CardGroup>

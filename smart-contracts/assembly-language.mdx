@@ -1,0 +1,263 @@
+---
+title: Assembly Language
+description: Learn the assembly language syntax for writing Minichain smart contracts
+---
+
+Minichain smart contracts are written in a custom assembly language that compiles to bytecode for the register-based VM. The assembly language provides low-level control over contract execution while maintaining readability through symbolic labels and comments.
+
+## Overview
+
+The assembler uses a three-stage pipeline:
+
+1. **Lexer** - Tokenizes the source code into a stream of tokens
+2. **Parser** - Builds an Abstract Syntax Tree (AST) from the tokens
+3. **Compiler** - Performs two-pass compilation to emit bytecode:
+   - Pass 1: Collect label addresses and constants
+   - Pass 2: Emit bytecode with resolved label references
+
+## Language Features
+
+<CardGroup cols={2}>
+  <Card title="60+ Instructions" icon="microchip">
+    Full VM instruction set support including arithmetic, bitwise, memory, storage, and control flow
+  </Card>
+  <Card title="Symbolic Labels" icon="tag">
+    Use labels as jump targets instead of raw addresses
+  </Card>
+  <Card title="Directives" icon="command">
+    `.entry` for entry points, `.const` for named constants
+  </Card>
+  <Card title="Comments" icon="comment">
+    Semicolon-style comments for code documentation
+  </Card>
+</CardGroup>
+
+## Basic Syntax
+
+### Instructions
+
+Instructions are case-insensitive and follow a simple format:
+
+```asm
+OPCODE operand1, operand2, operand3
+```
+
+<CodeGroup>
+```asm Arithmetic
+ADD R0, R1, R2      ; R0 = R1 + R2
+SUB R0, R1, R2      ; R0 = R1 - R2
+MUL R3, R0, R1      ; R3 = R0 * R1
+DIV R4, R2, R3      ; R4 = R2 / R3
+```
+
+```asm Immediate Values
+LOADI R0, 42        ; Load immediate value
+LOADI R1, 0xFF      ; Hex literals supported
+ADDI R0, R0, 10     ; Add immediate: R0 = R0 + 10
+```
+
+```asm Memory Access
+LOAD64 R0, R1       ; Load 64-bit from memory address in R1
+STORE64 R2, R3      ; Store R3 to memory address in R2
+LOAD8 R4, R5        ; Load single byte
+STORE8 R6, R7       ; Store single byte
+```
+</CodeGroup>
+
+### Registers
+
+Minichain VM has **16 general-purpose registers** (R0-R15):
+
+```asm
+R0, R1, R2, ... R15  ; Case-insensitive (r0, R0 both work)
+```
+
+<Info>
+  Register names are case-insensitive. Both `R0` and `r0` are valid.
+</Info>
+
+### Labels
+
+Labels define symbolic names for code locations:
+
+```asm
+main:               ; Label definition
+    LOADI R0, 10
+    LOADI R5, end   ; Reference label as immediate
+    JUMP R5         ; Jump to label address
+
+end:
+    HALT
+```
+
+Labels are followed by a colon (`:`) and must be on their own line. They can be referenced in `LOADI` instructions to load their addresses.
+
+### Directives
+
+Directives provide metadata and constants:
+
+#### `.entry` Directive
+
+Specifies the program entry point:
+
+```asm
+.entry main
+
+main:
+    LOADI R0, 42
+    HALT
+```
+
+#### `.const` Directive
+
+Defines named constants:
+
+```asm
+.const MAX_VALUE 1000
+.const STORAGE_SLOT 0
+
+main:
+    LOADI R0, MAX_VALUE      ; Load 1000
+    LOADI R1, STORAGE_SLOT   ; Load 0
+    HALT
+```
+
+### Comments
+
+Comments start with semicolon (`;`) and continue to end of line:
+
+```asm
+; This is a full-line comment
+LOADI R0, 42    ; This is an inline comment
+```
+
+## Number Literals
+
+The assembler supports both decimal and hexadecimal numbers:
+
+```asm
+LOADI R0, 255       ; Decimal
+LOADI R1, 0xFF      ; Hexadecimal (0x prefix)
+LOADI R2, 0x10      ; 16 in decimal
+```
+
+## Instruction Encoding
+
+Instructions are encoded compactly in bytecode:
+
+<AccordionGroup>
+  <Accordion title="No operands (1 byte)">
+    Instructions like `HALT`, `NOP`, `RET`, `REVERT`
+    
+    ```
+    [opcode]
+    ```
+  </Accordion>
+
+  <Accordion title="Single register (2 bytes)">
+    Instructions like `JUMP R0`, `LOG R1`, `CALLER R2`
+    
+    ```
+    [opcode] [reg << 4]
+    ```
+  </Accordion>
+
+  <Accordion title="Two registers (2 bytes)">
+    Instructions like `MOV R0, R1`, `SLOAD R2, R3`
+    
+    ```
+    [opcode] [(dst << 4) | src]
+    ```
+  </Accordion>
+
+  <Accordion title="Three registers (3 bytes)">
+    Instructions like `ADD R0, R1, R2`, `MUL R3, R4, R5`
+    
+    ```
+    [opcode] [(dst << 4) | s1] [s2 << 4]
+    ```
+  </Accordion>
+
+  <Accordion title="Register + immediate (10 bytes)">
+    Instructions like `LOADI R0, 100`, `ADDI R1, R2, 50`
+    
+    ```
+    [opcode] [reg << 4] [8-byte immediate (little-endian)]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Example Program
+
+Here's a complete program demonstrating various features:
+
+```asm counter.asm
+; Counter contract - increment storage value
+.entry main
+
+main:
+    LOADI R0, 0          ; storage slot 0
+    SLOAD R1, R0         ; load current value
+    LOADI R2, 1          ; increment by 1
+    ADD R1, R1, R2       ; increment
+    SSTORE R0, R1        ; store back
+    HALT                 ; done
+```
+
+This program:
+1. Loads storage slot 0 into R0
+2. Reads the value from storage into R1
+3. Adds 1 to the value
+4. Stores the result back to storage
+5. Halts execution
+
+## Compilation
+
+Assembly code is compiled to bytecode using the assembler:
+
+```rust
+use minichain_assembler::assemble;
+
+let source = r#"
+    .entry main
+    main:
+        LOADI R0, 42
+        HALT
+"#;
+
+let bytecode = assemble(source).expect("failed to assemble");
+println!("Compiled {} bytes", bytecode.len());
+```
+
+<Check>
+  The assembler validates syntax, checks for undefined labels, and ensures registers are in the valid range (R0-R15).
+</Check>
+
+## Error Handling
+
+The assembler provides clear error messages:
+
+<CodeGroup>
+```text Undefined Label
+compile error: undefined label: loop_end
+```
+
+```text Duplicate Label
+duplicate label 'main' at line 5 (first defined at line 2)
+```
+
+```text Invalid Register
+invalid register at line 3: R16
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Writing Contracts" icon="code" href="/smart-contracts/writing-contracts">
+    Learn how to structure complete smart contracts
+  </Card>
+  <Card title="Instruction Reference" icon="book" href="/vm/instructions">
+    Complete reference of all VM instructions
+  </Card>
+</CardGroup>

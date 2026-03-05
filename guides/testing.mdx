@@ -1,0 +1,619 @@
+---
+title: Testing Guide
+description: Learn how to write and run tests for Minichain smart contracts and VM code
+---
+
+Learn how to write comprehensive tests for Minichain contracts, understand the testing structure, and run tests effectively.
+
+## Testing Philosophy
+
+Minichain uses Rust's built-in testing framework for:
+
+- **Unit tests**: Test individual VM opcodes and components
+- **Integration tests**: Test complete contract workflows
+- **End-to-end tests**: Test full blockchain operations
+
+All tests run with `cargo test` and provide detailed output.
+
+## Test Organization
+
+Minichain's test structure:
+
+```
+minichain/
+├── crates/
+│   ├── vm/
+│   │   └── tests/
+│   │       └── vm_test.rs          # VM unit tests
+│   ├── core/
+│   │   └── src/
+│   │       └── lib.rs               # Core tests (inline)
+│   └── assembler/
+│       └── src/
+│           └── lib.rs               # Assembler tests (inline)
+└── tests/
+    ├── vm_tests.rs                  # VM integration tests
+    ├── chain_tests.rs               # Blockchain tests
+    └── e2e_tests.rs                 # End-to-end tests
+```
+
+## Running Tests
+
+<Steps>
+
+1. **Run All Tests**
+
+   ```bash
+   cargo test --all
+   ```
+
+   This runs every test in the workspace.
+
+2. **Run Tests for Specific Crate**
+
+   ```bash
+   # Test only the VM
+   cargo test -p minichain-vm
+   
+   # Test only the assembler
+   cargo test -p minichain-assembler
+   
+   # Test only core primitives
+   cargo test -p minichain-core
+   ```
+
+3. **Run Specific Test**
+
+   ```bash
+   cargo test test_add
+   ```
+
+   Runs only tests matching "test_add".
+
+4. **Run Tests with Output**
+
+   ```bash
+   cargo test -- --nocapture
+   ```
+
+   Shows `println!` output from tests.
+
+5. **Run Tests in Parallel**
+
+   ```bash
+   cargo test -- --test-threads=4
+   ```
+
+   Control parallel execution (default: number of CPU cores).
+
+</Steps>
+
+## Writing VM Tests
+
+### Basic Opcode Test
+
+Test individual VM opcodes:
+
+```rust
+use minichain_core::crypto::Address;
+use minichain_vm::Vm;
+
+#[test]
+fn test_add() {
+    // Assembly:
+    // LOADI R0, 10
+    // LOADI R1, 20
+    // ADD R2, R0, R1
+    // LOG R2
+    // HALT
+    
+    let bytecode = vec![
+        // LOADI R0, 10
+        0x70, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // LOADI R1, 20
+        0x70, 0x10, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // ADD R2, R0, R1
+        0x10, 0x20, 0x10,
+        // LOG R2
+        0xF0, 0x20,
+        // HALT
+        0x00,
+    ];
+
+    let mut vm = Vm::new(
+        bytecode,
+        1_000_000,           // gas limit
+        Address::ZERO,       // caller
+        Address::ZERO,       // contract address
+        0                    // value
+    );
+    
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![30]);  // 10 + 20 = 30
+}
+```
+
+**Key elements:**
+
+1. **Bytecode**: Hand-crafted bytecode for the operation
+2. **VM Creation**: Initialize with bytecode and gas limit
+3. **Execution**: Call `vm.run()` to execute
+4. **Assertions**: Verify success and output
+
+### Testing Arithmetic Operations
+
+```rust
+#[test]
+fn test_sub() {
+    // LOADI R0, 20
+    // LOADI R1, 8
+    // SUB R2, R0, R1
+    // LOG R2
+    // HALT
+    let bytecode = vec![
+        0x70, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x70, 0x10, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x11, 0x20, 0x10,  // SUB opcode = 0x11
+        0xF0, 0x20,
+        0x00,
+    ];
+
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![12]);  // 20 - 8 = 12
+}
+
+#[test]
+fn test_mul() {
+    // LOADI R0, 6
+    // LOADI R1, 7
+    // MUL R2, R0, R1
+    // LOG R2
+    // HALT
+    let bytecode = vec![
+        0x70, 0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x70, 0x10, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x12, 0x20, 0x10,  // MUL opcode = 0x12
+        0xF0, 0x20,
+        0x00,
+    ];
+
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![42]);  // 6 × 7 = 42
+}
+
+#[test]
+fn test_div() {
+    // LOADI R0, 20
+    // LOADI R1, 4
+    // DIV R2, R0, R1
+    // LOG R2
+    // HALT
+    let bytecode = vec![
+        0x70, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x70, 0x10, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x13, 0x20, 0x10,  // DIV opcode = 0x13
+        0xF0, 0x20,
+        0x00,
+    ];
+
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![5]);  // 20 ÷ 4 = 5
+}
+```
+
+### Testing Comparison Operations
+
+```rust
+#[test]
+fn test_comparison_lt() {
+    // LOADI R0, 5
+    // LOADI R1, 10
+    // LT R2, R0, R1  (5 < 10 = true = 1)
+    // LOG R2
+    // HALT
+    let bytecode = vec![
+        0x70, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x70, 0x10, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x32, 0x20, 0x10,  // LT opcode = 0x32
+        0xF0, 0x20,
+        0x00,
+    ];
+
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![1]);  // true = 1
+}
+```
+
+### Testing Bitwise Operations
+
+```rust
+#[test]
+fn test_bitwise_and() {
+    // LOADI R0, 0xFF
+    // LOADI R1, 0x0F
+    // AND R2, R0, R1
+    // LOG R2
+    // HALT
+    let bytecode = vec![
+        0x70, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x70, 0x10, 0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x20, 0x20, 0x10,  // AND opcode = 0x20
+        0xF0, 0x20,
+        0x00,
+    ];
+
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![0x0F]);  // 0xFF & 0x0F = 0x0F
+}
+```
+
+### Testing Register Operations
+
+```rust
+#[test]
+fn test_mov() {
+    // LOADI R0, 42
+    // MOV R1, R0  (0x71 = opcode, 0x10 = dst:R1 src:R0)
+    // LOG R1
+    // HALT
+    let bytecode = vec![
+        0x70, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x71, 0x10,  // MOV opcode = 0x71
+        0xF0, 0x10,
+        0x00,
+    ];
+
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+
+    assert!(result.success);
+    assert_eq!(result.logs, vec![42]);
+}
+```
+
+### Testing Error Conditions
+
+```rust
+#[test]
+fn test_out_of_gas() {
+    // Simple program that should run out of gas
+    let bytecode = vec![
+        0x70, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+
+    // Gas limit of 1 is not enough for LOADI (costs 2)
+    let mut vm = Vm::new(bytecode, 1, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run();
+
+    assert!(result.is_err());
+}
+```
+
+## Testing the Assembler
+
+### Basic Assembly Compilation
+
+```rust
+use minichain_assembler::assemble;
+
+#[test]
+fn test_assemble_simple() {
+    let source = "LOADI R0, 10\nHALT";
+    let bytecode = assemble(source).unwrap();
+    
+    assert!(!bytecode.is_empty());
+    assert_eq!(bytecode[0], 0x70);  // LOADI opcode
+}
+
+#[test]
+fn test_assemble_with_labels() {
+    let source = r#"
+        .entry main
+        main:
+            LOADI R0, 10
+            LOADI R5, end
+            JUMP R5
+        end:
+            HALT
+    "#;
+    
+    let bytecode = assemble(source).unwrap();
+    assert!(!bytecode.is_empty());
+}
+
+#[test]
+fn test_assemble_error_undefined_label() {
+    let source = "LOADI R5, undefined";
+    let result = assemble(source);
+    
+    assert!(result.is_err());
+}
+```
+
+### Testing Complete Programs
+
+```rust
+#[test]
+fn test_complete_program() {
+    let source = r#"
+        ; Counter contract - increment storage value
+        .entry main
+
+        main:
+            LOADI R0, 0          ; storage slot 0
+            SLOAD R1, R0         ; load current value
+            LOADI R2, 1          ; increment by 1
+            ADD R1, R1, R2       ; increment
+            SSTORE R0, R1        ; store back
+            HALT                 ; done
+    "#;
+
+    let bytecode = assemble(source).unwrap();
+    
+    // Verify it compiles without error
+    assert!(!bytecode.is_empty());
+    
+    // Check key opcodes are present
+    assert_eq!(bytecode[0], 0x70);   // First LOADI
+    assert_eq!(bytecode[10], 0x50);  // SLOAD
+    assert!(bytecode.contains(&0x00)); // HALT at end
+}
+```
+
+## Test Patterns
+
+### Pattern: Testing with Storage
+
+To test storage operations, implement `StorageBackend`:
+
+```rust
+use std::collections::HashMap;
+use minichain_vm::StorageBackend;
+
+struct MockStorage {
+    data: HashMap<[u8; 32], [u8; 32]>,
+}
+
+impl MockStorage {
+    fn new() -> Self {
+        Self {
+            data: HashMap::new(),
+        }
+    }
+}
+
+impl StorageBackend for MockStorage {
+    fn sload(&self, key: &[u8; 32]) -> [u8; 32] {
+        self.data.get(key).copied().unwrap_or([0u8; 32])
+    }
+    
+    fn sstore(&mut self, key: &[u8; 32], value: &[u8; 32]) {
+        self.data.insert(*key, *value);
+    }
+}
+
+#[test]
+fn test_storage_operations() {
+    let bytecode = vec![
+        // LOADI R0, 0
+        0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // LOADI R1, 42
+        0x70, 0x10, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // SSTORE R0, R1
+        0x51, 0x01,
+        // SLOAD R2, R0
+        0x50, 0x20,
+        // LOG R2
+        0xF0, 0x20,
+        // HALT
+        0x00,
+    ];
+    
+    let mut vm = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    let storage = MockStorage::new();
+    vm.set_storage(Box::new(storage));
+    
+    let result = vm.run().unwrap();
+    
+    assert!(result.success);
+    assert_eq!(result.logs, vec![42]);
+}
+```
+
+### Pattern: Testing Gas Consumption
+
+```rust
+#[test]
+fn test_gas_consumption() {
+    let bytecode = vec![
+        0x70, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // LOADI: 2 gas
+        0x70, 0x10, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // LOADI: 2 gas
+        0x10, 0x20, 0x10,  // ADD: 2 gas
+        0x00,              // HALT: 0 gas
+    ];
+    
+    let gas_limit = 1_000_000;
+    let mut vm = Vm::new(bytecode, gas_limit, Address::ZERO, Address::ZERO, 0);
+    let result = vm.run().unwrap();
+    
+    assert_eq!(result.gas_used, 6);  // 2 + 2 + 2
+}
+```
+
+### Pattern: Testing Multiple Executions
+
+```rust
+#[test]
+fn test_counter_increments() {
+    let bytecode = vec![
+        // Counter increment logic
+        0x70, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x50, 0x10,  // SLOAD R1, R0
+        0x70, 0x20, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x10, 0x12, 0x10,  // ADD R1, R1, R2
+        0x51, 0x01,  // SSTORE R0, R1
+        0xF0, 0x10,  // LOG R1
+        0x00,
+    ];
+    
+    let storage = MockStorage::new();
+    
+    // First execution
+    let mut vm1 = Vm::new(bytecode.clone(), 1_000_000, Address::ZERO, Address::ZERO, 0);
+    vm1.set_storage(Box::new(storage));
+    let result1 = vm1.run().unwrap();
+    assert_eq!(result1.logs, vec![1]);  // First increment
+    
+    // Second execution (reuse storage)
+    let mut vm2 = Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0);
+    // Note: In real tests, persist storage between calls
+    let result2 = vm2.run().unwrap();
+    assert_eq!(result2.logs, vec![2]);  // Second increment
+}
+```
+
+## Best Practices
+
+### 1. Test Organization
+
+```rust
+// Group related tests in modules
+#[cfg(test)]
+mod arithmetic_tests {
+    use super::*;
+    
+    #[test]
+    fn test_add() { /* ... */ }
+    
+    #[test]
+    fn test_sub() { /* ... */ }
+}
+
+#[cfg(test)]
+mod storage_tests {
+    use super::*;
+    
+    #[test]
+    fn test_sload() { /* ... */ }
+    
+    #[test]
+    fn test_sstore() { /* ... */ }
+}
+```
+
+### 2. Use Helper Functions
+
+```rust
+fn create_vm(bytecode: Vec<u8>) -> Vm {
+    Vm::new(bytecode, 1_000_000, Address::ZERO, Address::ZERO, 0)
+}
+
+fn run_and_check_logs(bytecode: Vec<u8>, expected_logs: Vec<u64>) {
+    let mut vm = create_vm(bytecode);
+    let result = vm.run().unwrap();
+    assert!(result.success);
+    assert_eq!(result.logs, expected_logs);
+}
+
+#[test]
+fn test_with_helper() {
+    let bytecode = vec![/* ... */];
+    run_and_check_logs(bytecode, vec![42]);
+}
+```
+
+### 3. Test Edge Cases
+
+```rust
+#[test]
+fn test_integer_overflow() {
+    // Test wrapping behavior
+    let bytecode = vec![
+        // LOADI R0, u64::MAX
+        0x70, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        // LOADI R1, 1
+        0x70, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        // ADD R2, R0, R1 (should wrap)
+        0x10, 0x20, 0x10,
+        0xF0, 0x20,
+        0x00,
+    ];
+    
+    let mut vm = create_vm(bytecode);
+    let result = vm.run().unwrap();
+    assert_eq!(result.logs, vec![0]);  // Wraps to 0
+}
+```
+
+### 4. Document Test Intent
+
+```rust
+/// Test that the ADD opcode correctly adds two registers.
+/// This verifies basic arithmetic functionality of the VM.
+#[test]
+fn test_add() {
+    // Arrange: Create bytecode for 10 + 20
+    let bytecode = vec![/* ... */];
+    
+    // Act: Execute in VM
+    let mut vm = create_vm(bytecode);
+    let result = vm.run().unwrap();
+    
+    // Assert: Result should be 30
+    assert_eq!(result.logs, vec![30]);
+}
+```
+
+## Running Tests in CI
+
+For continuous integration:
+
+```bash
+# Run all tests with verbose output
+cargo test --all --verbose
+
+# Run tests and generate coverage report (requires cargo-tarpaulin)
+cargo tarpaulin --out Html
+
+# Run with release mode for performance testing
+cargo test --release
+```
+
+## Next Steps
+
+- Explore real-world examples in [Contract Examples](/smart-contracts/examples)
+- Learn debugging techniques in [Debugging Contracts](/guides/debugging-contracts)
+- Understand gas metering in [Gas Metering](/vm/gas-metering)
+- Read the complete [Opcode Reference](/vm/opcodes)
+
+## Summary
+
+Effective testing in Minichain requires:
+
+✅ **Unit tests** for individual opcodes
+✅ **Integration tests** for complete workflows
+✅ **Mock storage** for testing state operations
+✅ **Gas consumption** verification
+✅ **Edge case** coverage
+✅ **Helper functions** for code reuse
+✅ **Clear documentation** of test intent
+
+With comprehensive tests, you can build reliable and correct smart contracts on Minichain.

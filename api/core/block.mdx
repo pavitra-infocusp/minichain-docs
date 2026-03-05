@@ -1,0 +1,577 @@
+---
+title: Block
+description: Block and block header structures for the blockchain
+---
+
+The `block` module provides the `Block` and `BlockHeader` types, which represent blocks in the blockchain and implement the Proof of Authority (PoA) consensus mechanism.
+
+## Overview
+
+Blocks are the fundamental units of the blockchain. Each block contains a header with metadata and a list of transactions. Blocks are signed by authority nodes in a PoA consensus system.
+
+## Types
+
+### BlockHeader
+
+```rust
+pub struct BlockHeader {
+    pub height: u64,
+    pub timestamp: u64,
+    pub prev_hash: Hash,
+    pub merkle_root: Hash,
+    pub state_root: Hash,
+    pub author: Address,
+    pub difficulty: u64,
+    pub nonce: u64,
+}
+```
+
+The header of a block containing metadata.
+
+<ParamField path="height" type="u64">
+  Block height (0 for genesis block).
+</ParamField>
+
+<ParamField path="timestamp" type="u64">
+  Unix timestamp in seconds when the block was created.
+</ParamField>
+
+<ParamField path="prev_hash" type="Hash">
+  Hash of the previous block (Hash::ZERO for genesis).
+</ParamField>
+
+<ParamField path="merkle_root" type="Hash">
+  Merkle root of all transactions in the block.
+</ParamField>
+
+<ParamField path="state_root" type="Hash">
+  Root hash of the world state after applying this block.
+</ParamField>
+
+<ParamField path="author" type="Address">
+  Address of the block author (PoA authority).
+</ParamField>
+
+<ParamField path="difficulty" type="u64">
+  Difficulty (always 1 for PoA consensus).
+</ParamField>
+
+<ParamField path="nonce" type="u64">
+  Nonce (unused in PoA, kept for structure compatibility).
+</ParamField>
+
+#### Methods
+
+<ResponseField name="hash" type="fn(&self) -> Hash">
+  Calculates the hash of this block header.
+  
+  This is the block's unique identifier.
+  
+  ```rust
+  let header = BlockHeader { /* ... */ };
+  let block_hash = header.hash();
+  println!("Block hash: {}", block_hash.to_hex());
+  ```
+</ResponseField>
+
+<ResponseField name="current_timestamp" type="fn() -> u64">
+  Gets the current Unix timestamp in seconds.
+  
+  ```rust
+  let now = BlockHeader::current_timestamp();
+  ```
+</ResponseField>
+
+#### Trait Implementations
+
+- **Debug, Clone, PartialEq, Eq**: Standard derivations
+- **Serialize, Deserialize**: Serde support
+
+### Block
+
+```rust
+pub struct Block {
+    pub header: BlockHeader,
+    pub transactions: Vec<Transaction>,
+    pub signature: Signature,
+}
+```
+
+A complete block including header, transactions, and authority signature.
+
+<ParamField path="header" type="BlockHeader">
+  Block header containing metadata.
+</ParamField>
+
+<ParamField path="transactions" type="Vec<Transaction>">
+  List of transactions included in this block.
+</ParamField>
+
+<ParamField path="signature" type="Signature">
+  Authority signature over the block header hash.
+</ParamField>
+
+#### Constructors
+
+<ResponseField name="new" type="fn(height: u64, prev_hash: Hash, transactions: Vec<Transaction>, state_root: Hash, author: Address) -> Self">
+  Creates a new unsigned block.
+  
+  Automatically calculates the merkle root from transactions and sets the current timestamp.
+  
+  ```rust
+  use minichain_core::{Block, Transaction, Hash};
+  use minichain_core::crypto::Address;
+  
+  let transactions = vec![/* ... */];
+  let block = Block::new(
+      1,                    // height
+      prev_block_hash,      // prev_hash
+      transactions,         // transactions
+      state_root,           // state_root
+      authority_address,    // author
+  );
+  ```
+</ResponseField>
+
+<ResponseField name="genesis" type="fn(authority: Address) -> Self">
+  Creates the genesis block (height 0).
+  
+  The genesis block has no transactions and all hash fields are set to Hash::ZERO.
+  
+  ```rust
+  use minichain_core::Block;
+  use minichain_core::crypto::Address;
+  
+  let authority = Address::from_hex("0x1234...").unwrap();
+  let genesis = Block::genesis(authority);
+  
+  assert!(genesis.is_genesis());
+  assert_eq!(genesis.height(), 0);
+  assert!(genesis.transactions.is_empty());
+  ```
+</ResponseField>
+
+#### Methods
+
+<ResponseField name="hash" type="fn(&self) -> Hash">
+  Gets the block hash (hash of the header).
+  
+  ```rust
+  let block = Block::genesis(authority);
+  let block_id = block.hash();
+  ```
+</ResponseField>
+
+<ResponseField name="height" type="fn(&self) -> u64">
+  Gets the block height.
+  
+  ```rust
+  let block = Block::new(5, prev_hash, txs, state_root, author);
+  assert_eq!(block.height(), 5);
+  ```
+</ResponseField>
+
+<ResponseField name="is_genesis" type="fn(&self) -> bool">
+  Checks if this is the genesis block.
+  
+  ```rust
+  let genesis = Block::genesis(authority);
+  assert!(genesis.is_genesis());
+  ```
+</ResponseField>
+
+<ResponseField name="tx_count" type="fn(&self) -> usize">
+  Gets the number of transactions in this block.
+  
+  ```rust
+  let block = Block::new(1, prev_hash, txs, state_root, author);
+  println!("Block contains {} transactions", block.tx_count());
+  ```
+</ResponseField>
+
+<ResponseField name="sign" type="fn(&mut self, keypair: &Keypair)">
+  Signs the block with the authority's keypair (mutates in place).
+  
+  ```rust
+  let mut block = Block::new(1, prev_hash, txs, state_root, authority.address());
+  block.sign(&authority);
+  ```
+</ResponseField>
+
+<ResponseField name="signed" type="fn(self, keypair: &Keypair) -> Self">
+  Signs the block and returns it (builder pattern).
+  
+  ```rust
+  let block = Block::new(1, prev_hash, txs, state_root, authority.address())
+      .signed(&authority);
+  ```
+</ResponseField>
+
+<ResponseField name="verify_signature" type="fn(&self, public_key: &PublicKey) -> bool">
+  Verifies the block signature against a public key.
+  
+  ```rust
+  let block = Block::genesis(authority.address()).signed(&authority);
+  assert!(block.verify_signature(&authority.public_key));
+  ```
+</ResponseField>
+
+<ResponseField name="verify_merkle_root" type="fn(&self) -> bool">
+  Verifies that the merkle root matches the transactions.
+  
+  ```rust
+  let block = Block::new(1, prev_hash, txs, state_root, author);
+  assert!(block.verify_merkle_root());
+  ```
+</ResponseField>
+
+<ResponseField name="total_gas_limit" type="fn(&self) -> u64">
+  Calculates the total gas limit of all transactions.
+  
+  ```rust
+  let block = Block::new(1, prev_hash, txs, state_root, author);
+  let total_gas = block.total_gas_limit();
+  println!("Total gas limit: {}", total_gas);
+  ```
+</ResponseField>
+
+#### Trait Implementations
+
+- **Debug, Clone, PartialEq, Eq**: Standard derivations
+- **Serialize, Deserialize**: Serde support
+
+## Usage Examples
+
+### Creating the Genesis Block
+
+```rust
+use minichain_core::Block;
+use minichain_core::crypto::Keypair;
+
+// Generate authority keypair
+let authority = Keypair::generate();
+
+// Create and sign genesis block
+let genesis = Block::genesis(authority.address())
+    .signed(&authority);
+
+assert!(genesis.is_genesis());
+assert_eq!(genesis.height(), 0);
+assert!(genesis.transactions.is_empty());
+assert!(genesis.verify_signature(&authority.public_key));
+
+println!("Genesis block hash: {}", genesis.hash().to_hex());
+```
+
+### Creating a New Block
+
+```rust
+use minichain_core::{Block, Transaction, Hash};
+use minichain_core::crypto::Keypair;
+
+// Authority and users
+let authority = Keypair::generate();
+let alice = Keypair::generate();
+let bob = Keypair::generate();
+
+// Create some transactions
+let tx1 = Transaction::transfer(
+    alice.address(),
+    bob.address(),
+    1000,
+    0,
+    1,
+).signed(&alice);
+
+let tx2 = Transaction::transfer(
+    bob.address(),
+    alice.address(),
+    500,
+    0,
+    1,
+).signed(&bob);
+
+let transactions = vec![tx1, tx2];
+
+// Get previous block hash and state root
+let prev_block_hash = /* from previous block */;
+let new_state_root = /* calculated after applying transactions */;
+
+// Create and sign new block
+let block = Block::new(
+    1,                       // height
+    prev_block_hash,         // prev_hash
+    transactions,            // transactions
+    new_state_root,          // state_root
+    authority.address(),     // author
+).signed(&authority);
+
+println!("Created block {}", block.height());
+println!("Block hash: {}", block.hash().to_hex());
+println!("Transactions: {}", block.tx_count());
+```
+
+### Verifying a Block
+
+```rust
+use minichain_core::Block;
+use minichain_core::crypto::{Keypair, PublicKey};
+
+let authority = Keypair::generate();
+let block = Block::genesis(authority.address()).signed(&authority);
+
+// Verify signature
+if block.verify_signature(&authority.public_key) {
+    println!("✓ Signature valid");
+} else {
+    println!("✗ Signature invalid");
+}
+
+// Verify merkle root
+if block.verify_merkle_root() {
+    println!("✓ Merkle root valid");
+} else {
+    println!("✗ Merkle root invalid");
+}
+```
+
+### Block Chain Linking
+
+```rust
+use minichain_core::{Block, Hash};
+use minichain_core::crypto::Keypair;
+
+let authority = Keypair::generate();
+
+// Create genesis block
+let genesis = Block::genesis(authority.address()).signed(&authority);
+let mut chain = vec![genesis];
+
+// Create subsequent blocks
+for height in 1..=5 {
+    let prev_hash = chain.last().unwrap().hash();
+    let block = Block::new(
+        height,
+        prev_hash,
+        vec![],              // no transactions
+        Hash::ZERO,          // state root
+        authority.address(),
+    ).signed(&authority);
+    
+    chain.push(block);
+}
+
+// Verify chain integrity
+for i in 1..chain.len() {
+    let prev_hash = chain[i - 1].hash();
+    let curr_prev = chain[i].header.prev_hash;
+    assert_eq!(prev_hash, curr_prev, "Chain broken at block {}", i);
+}
+
+println!("Created chain of {} blocks", chain.len());
+```
+
+### Calculating Block Properties
+
+```rust
+use minichain_core::{Block, Transaction};
+use minichain_core::crypto::Keypair;
+
+let authority = Keypair::generate();
+let alice = Keypair::generate();
+let bob = Keypair::generate();
+
+// Create transactions with different gas limits
+let tx1 = Transaction::new(
+    0,
+    alice.address(),
+    Some(bob.address()),
+    100,
+    vec![],
+    21_000,
+    1,
+).signed(&alice);
+
+let tx2 = Transaction::new(
+    0,
+    bob.address(),
+    Some(alice.address()),
+    50,
+    vec![],
+    30_000,
+    1,
+).signed(&bob);
+
+let block = Block::new(
+    1,
+    prev_hash,
+    vec![tx1, tx2],
+    state_root,
+    authority.address(),
+);
+
+// Calculate block properties
+println!("Block height: {}", block.height());
+println!("Transaction count: {}", block.tx_count());
+println!("Total gas limit: {}", block.total_gas_limit());
+println!("Block size: {} bytes", bincode::serialize(&block).unwrap().len());
+```
+
+### Block Timestamp Handling
+
+```rust
+use minichain_core::{Block, BlockHeader};
+use minichain_core::crypto::Address;
+
+// Get current timestamp
+let now = BlockHeader::current_timestamp();
+println!("Current timestamp: {}", now);
+
+// Create block with automatic timestamp
+let block = Block::new(
+    1,
+    prev_hash,
+    vec![],
+    state_root,
+    authority,
+);
+
+println!("Block timestamp: {}", block.header.timestamp);
+
+// Verify timestamp is recent
+let block_time = block.header.timestamp;
+let current_time = BlockHeader::current_timestamp();
+assert!(current_time - block_time < 60, "Block too old");
+```
+
+### Empty Block Creation
+
+```rust
+use minichain_core::{Block, Hash};
+use minichain_core::crypto::Keypair;
+
+let authority = Keypair::generate();
+
+// Create empty block (no transactions)
+let block = Block::new(
+    1,
+    prev_hash,
+    vec![],              // empty transaction list
+    state_root,
+    authority.address(),
+).signed(&authority);
+
+assert_eq!(block.tx_count(), 0);
+assert_eq!(block.header.merkle_root, Hash::ZERO);
+assert!(block.verify_merkle_root());
+```
+
+### Multi-Authority PoA
+
+```rust
+use minichain_core::Block;
+use minichain_core::crypto::Keypair;
+
+// Create multiple authorities
+let authorities = vec![
+    Keypair::generate(),
+    Keypair::generate(),
+    Keypair::generate(),
+];
+
+let mut blocks = vec![];
+
+// Genesis block by first authority
+let genesis = Block::genesis(authorities[0].address())
+    .signed(&authorities[0]);
+blocks.push(genesis);
+
+// Subsequent blocks rotate through authorities
+for height in 1..=10 {
+    let authority_index = (height % authorities.len() as u64) as usize;
+    let authority = &authorities[authority_index];
+    
+    let prev_hash = blocks.last().unwrap().hash();
+    let block = Block::new(
+        height,
+        prev_hash,
+        vec![],
+        Hash::ZERO,
+        authority.address(),
+    ).signed(authority);
+    
+    // Verify correct authority signed
+    assert!(block.verify_signature(&authority.public_key));
+    
+    blocks.push(block);
+}
+
+println!("Created {} blocks with {} authorities", blocks.len(), authorities.len());
+```
+
+## Implementation Details
+
+### Proof of Authority (PoA)
+
+Minichain uses PoA consensus where:
+
+- Designated authorities take turns producing blocks
+- Each authority signs blocks with their Ed25519 keypair
+- Block validity requires valid authority signature
+- No mining or proof-of-work required
+
+### Block Hash Calculation
+
+The block hash is computed by:
+
+1. Serializing the block header with bincode
+2. Hashing the serialized data with Blake3
+
+```rust
+pub fn hash(&self) -> Hash {
+    let encoded = bincode::serialize(self).expect("serialization should not fail");
+    hash(&encoded)
+}
+```
+
+### Merkle Root
+
+The merkle root is calculated from transaction hashes:
+
+```rust
+let tx_hashes: Vec<Hash> = transactions.iter().map(|tx| tx.hash()).collect();
+let merkle_root = merkle_root(&tx_hashes);
+```
+
+This allows efficient verification that a transaction is included in a block.
+
+### Timestamp Validation
+
+Blocks include Unix timestamps for:
+- Ordering blocks chronologically  
+- Preventing backdating attacks
+- Validating clock synchronization between authorities
+
+### State Root
+
+The state root is the Merkle root of the world state after applying all transactions in the block. This allows:
+- Verifying state consistency
+- Detecting state divergence between nodes
+- Efficient state proofs
+
+### Block Signing
+
+Authorities sign the block header hash:
+
+```rust
+pub fn sign(&mut self, keypair: &Keypair) {
+    let hash = self.header.hash();
+    self.signature = keypair.sign_hash(&hash);
+}
+```
+
+The signature covers all header fields, ensuring integrity.
+
+## Source Location
+
+Defined in `crates/core/src/block.rs`

@@ -1,0 +1,392 @@
+---
+title: 'Validation'
+description: 'Transaction and block validation rules for consensus enforcement'
+icon: 'shield-halved'
+---
+
+# Transaction and Block Validation
+
+The validation module provides comprehensive validation rules for transactions and blocks according to consensus rules. It performs format checks, state checks, and structural validation.
+
+## Transaction Validation
+
+### TransactionValidator
+
+Validator for transaction format, signature, and state checks.
+
+#### Methods
+
+##### `validate_transaction(tx: &Transaction) -> Result<()>`
+
+Basic transaction validation (format and gas checks).
+
+**Note**: This does NOT verify the signature since Ed25519 requires the public key which must be obtained from the blockchain state. Use `validate_with_signature` for full validation including signature.
+
+**Validation checks**:
+- Gas price must be non-zero
+- Gas limit must meet minimum requirements:
+  - Transfer: 21,000 minimum
+  - Contract call: 21,000 + (calldata length × 68)
+  - Contract deployment: 21,000 minimum
+- Contract deployments must have non-empty bytecode
+
+```rust
+use minichain_consensus::TransactionValidator;
+use minichain_core::Transaction;
+
+let tx = Transaction::transfer(from, to, 1000, 0, 1).signed(&keypair);
+TransactionValidator::validate_transaction(&tx)?;
+```
+
+##### `validate_with_signature(tx: &Transaction, public_key: &PublicKey) -> Result<()>`
+
+Validates transaction with signature verification.
+
+<ParamField path="tx" type="&Transaction" required>
+  The transaction to validate
+</ParamField>
+
+<ParamField path="public_key" type="&PublicKey" required>
+  The sender's public key for signature verification
+</ParamField>
+
+```rust
+use minichain_core::PublicKey;
+
+let public_key = get_public_key_from_state(&tx.from)?;
+TransactionValidator::validate_with_signature(&tx, &public_key)?;
+```
+
+##### `validate_against_state(tx: &Transaction, sender_nonce: u64, sender_balance: u64) -> Result<()>`
+
+Validates transaction against account state.
+
+<ParamField path="tx" type="&Transaction" required>
+  The transaction to validate
+</ParamField>
+
+<ParamField path="sender_nonce" type="u64" required>
+  The sender's current nonce from state
+</ParamField>
+
+<ParamField path="sender_balance" type="u64" required>
+  The sender's current balance from state
+</ParamField>
+
+**Validation checks**:
+- Transaction nonce must match sender's current nonce
+- Sender balance must cover `value + (gas_limit × gas_price)`
+
+```rust
+// Get state from blockchain
+let sender_nonce = state.get_nonce(&tx.from)?;
+let sender_balance = state.get_balance(&tx.from)?;
+
+// Validate against state
+TransactionValidator::validate_against_state(
+    &tx,
+    sender_nonce,
+    sender_balance
+)?;
+```
+
+##### `validate_full(tx: &Transaction, public_key: &PublicKey, sender_nonce: u64, sender_balance: u64) -> Result<()>`
+
+Full transaction validation (signature + format + state checks).
+
+```rust
+TransactionValidator::validate_full(
+    &tx,
+    &public_key,
+    sender_nonce,
+    sender_balance
+)?;
+```
+
+---
+
+## Block Validation
+
+### BlockValidator
+
+Validator for block structure, parent linkage, and transaction contents.
+
+#### Methods
+
+##### `validate_block_structure(block: &Block) -> Result<()>`
+
+Validates block structure and contents.
+
+**Validation checks**:
+- Merkle root matches transaction hashes
+- No duplicate transactions in the block
+- Block format is correct
+
+```rust
+use minichain_consensus::BlockValidator;
+use minichain_core::Block;
+
+let block = Block::new(height, prev_hash, transactions, state_root, author);
+BlockValidator::validate_block_structure(&block)?;
+```
+
+##### `validate_block_extends_parent(block: &Block, parent_hash: Hash, parent_height: u64) -> Result<()>`
+
+Validates that a block correctly extends its parent.
+
+<ParamField path="block" type="&Block" required>
+  The block to validate
+</ParamField>
+
+<ParamField path="parent_hash" type="Hash" required>
+  The parent block's hash
+</ParamField>
+
+<ParamField path="parent_height" type="u64" required>
+  The parent block's height
+</ParamField>
+
+**Validation checks**:
+- Block height is parent height + 1
+- Block's `prev_hash` matches parent hash
+
+```rust
+let parent = blockchain.get_block(&block.header.prev_hash)?;
+BlockValidator::validate_block_extends_parent(
+    &block,
+    parent.hash(),
+    parent.header.height
+)?;
+```
+
+##### `validate_block_transactions(block: &Block) -> Result<()>`
+
+Validates all transactions in the block (format only, not signatures).
+
+**Note**: This does NOT verify transaction signatures since that requires public keys from the blockchain state. Signature verification should be done during transaction execution.
+
+```rust
+BlockValidator::validate_block_transactions(&block)?;
+```
+
+##### `validate_full(block: &Block, parent_hash: Hash, parent_height: u64) -> Result<()>`
+
+Full block validation (structure + parent + transactions).
+
+```rust
+BlockValidator::validate_full(&block, parent_hash, parent_height)?;
+```
+
+---
+
+## Errors
+
+### ValidationError
+
+Errors that can occur during validation.
+
+<ResponseField name="InvalidSignature" type="()">
+  Transaction signature verification failed.
+</ResponseField>
+
+<ResponseField name="InvalidNonce" type="{ expected: u64, got: u64 }">
+  Transaction nonce doesn't match sender's current nonce.
+</ResponseField>
+
+<ResponseField name="InsufficientBalance" type="{ required: u64, available: u64 }">
+  Sender has insufficient balance to cover transaction cost.
+</ResponseField>
+
+<ResponseField name="GasLimitTooLow" type="{ minimum: u64, got: u64 }">
+  Transaction gas limit is below the required minimum.
+</ResponseField>
+
+<ResponseField name="ZeroGasPrice" type="()">
+  Transaction has zero gas price (not allowed).
+</ResponseField>
+
+<ResponseField name="EmptyDeploymentData" type="()">
+  Contract deployment transaction has no bytecode.
+</ResponseField>
+
+<ResponseField name="InvalidHeight" type="{ expected: u64, got: u64 }">
+  Block height doesn't correctly extend parent.
+</ResponseField>
+
+<ResponseField name="InvalidPrevHash" type="()">
+  Block's prev_hash doesn't match parent hash.
+</ResponseField>
+
+<ResponseField name="InvalidMerkleRoot" type="()">
+  Block merkle root verification failed.
+</ResponseField>
+
+<ResponseField name="DuplicateTransaction" type="()">
+  Block contains duplicate transactions.
+</ResponseField>
+
+<ResponseField name="TransactionHashMismatch" type="()">
+  Transaction hash doesn't match computed hash.
+</ResponseField>
+
+<ResponseField name="EmptyBlock" type="()">
+  Block contains no transactions and is not genesis.
+</ResponseField>
+
+---
+
+## Gas Calculation
+
+### Minimum Gas Requirements
+
+Transactions must meet minimum gas limits based on their type:
+
+```rust
+let min_gas = if tx.is_deploy() {
+    21_000  // Contract deployment
+} else if tx.is_call() {
+    21_000 + tx.data.len() as u64 * 68  // Contract call + calldata
+} else {
+    21_000  // Simple transfer
+};
+```
+
+### Maximum Transaction Cost
+
+The maximum cost of a transaction includes both the value transfer and gas fees:
+
+```rust
+let max_cost = tx.value + (tx.gas_limit * tx.gas_price);
+```
+
+The sender must have at least `max_cost` balance to send the transaction.
+
+---
+
+## Complete Example
+
+### Transaction Validation
+
+```rust
+use minichain_consensus::TransactionValidator;
+use minichain_core::{Transaction, Keypair, Address};
+
+// Create and sign transaction
+let keypair = Keypair::generate();
+let from = keypair.address();
+let to = Address::from_bytes([2u8; 20]);
+let tx = Transaction::transfer(from, to, 1000, 0, 1).signed(&keypair);
+
+// Basic format validation
+TransactionValidator::validate_transaction(&tx)?;
+
+// Validate with signature
+TransactionValidator::validate_with_signature(&tx, &keypair.public_key)?;
+
+// Get state from blockchain
+let sender_nonce = state.get_nonce(&from)?;
+let sender_balance = state.get_balance(&from)?;
+
+// Validate against state
+TransactionValidator::validate_against_state(&tx, sender_nonce, sender_balance)?;
+
+// Or do full validation in one call
+TransactionValidator::validate_full(
+    &tx,
+    &keypair.public_key,
+    sender_nonce,
+    sender_balance
+)?;
+
+println!("Transaction is valid!");
+```
+
+### Block Validation
+
+```rust
+use minichain_consensus::BlockValidator;
+use minichain_core::{Block, Hash};
+
+// Create block
+let block = Block::new(
+    height,
+    parent_hash,
+    transactions,
+    state_root,
+    author
+);
+
+// Validate structure (merkle root, duplicates)
+BlockValidator::validate_block_structure(&block)?;
+
+// Validate parent linkage
+let parent = blockchain.get_block(&block.header.prev_hash)?;
+BlockValidator::validate_block_extends_parent(
+    &block,
+    parent.hash(),
+    parent.header.height
+)?;
+
+// Validate all transactions (format only)
+BlockValidator::validate_block_transactions(&block)?;
+
+// Or do full validation in one call
+BlockValidator::validate_full(
+    &block,
+    parent.hash(),
+    parent.header.height
+)?;
+
+println!("Block is valid!");
+```
+
+---
+
+## Validation Pipeline
+
+### Transaction Processing
+
+1. **Format Validation**: Check gas price, gas limit, deployment data
+2. **Signature Validation**: Verify cryptographic signature
+3. **State Validation**: Check nonce and balance
+4. **Execution**: Execute transaction and update state
+
+```rust
+// 1. Format validation
+TransactionValidator::validate_transaction(&tx)?;
+
+// 2. Get public key from state
+let public_key = state.get_public_key(&tx.from)?;
+
+// 3. Verify signature
+TransactionValidator::validate_with_signature(&tx, &public_key)?;
+
+// 4. State validation
+let nonce = state.get_nonce(&tx.from)?;
+let balance = state.get_balance(&tx.from)?;
+TransactionValidator::validate_against_state(&tx, nonce, balance)?;
+
+// 5. Execute transaction
+executor.execute(&tx, &mut state)?;
+```
+
+### Block Processing
+
+1. **Structure Validation**: Merkle root, duplicates
+2. **Parent Validation**: Height, prev_hash
+3. **Transaction Validation**: Format of all transactions
+4. **Consensus Validation**: Authority, signature, timestamp (from PoA module)
+5. **State Execution**: Execute all transactions
+
+```rust
+// 1-3: Structural validation
+BlockValidator::validate_full(&block, parent_hash, parent_height)?;
+
+// 4: Consensus validation (PoA)
+authority.verify_block(&block, parent_timestamp)?;
+
+// 5: Execute block
+for tx in &block.transactions {
+    executor.execute(tx, &mut state)?;
+}
+```

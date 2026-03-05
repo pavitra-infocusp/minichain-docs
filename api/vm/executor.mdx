@@ -1,0 +1,346 @@
+---
+title: Executor
+description: Virtual machine execution engine and state management
+---
+
+The executor module provides the core VM execution loop, state management, and bytecode interpretation.
+
+## Vm Struct
+
+The main virtual machine state container.
+
+<ParamField path="registers" type="Registers">
+  16 general-purpose 64-bit registers (R0-R15)
+</ParamField>
+
+<ParamField path="memory" type="Memory">
+  Linear memory up to 1MB
+</ParamField>
+
+<ParamField path="pc" type="usize">
+  Program counter pointing to current instruction
+</ParamField>
+
+<ParamField path="gas" type="GasMeter">
+  Gas metering for execution costs
+</ParamField>
+
+<ParamField path="bytecode" type="Vec<u8>">
+  Bytecode being executed
+</ParamField>
+
+<ParamField path="halted" type="bool">
+  Whether execution has stopped
+</ParamField>
+
+<ParamField path="caller" type="Address">
+  Address of the calling account
+</ParamField>
+
+<ParamField path="address" type="Address">
+  Address of the current contract
+</ParamField>
+
+<ParamField path="call_value" type="u64">
+  Value sent with the call
+</ParamField>
+
+<ParamField path="block_number" type="u64">
+  Current block number
+</ParamField>
+
+<ParamField path="timestamp" type="u64">
+  Current block timestamp
+</ParamField>
+
+<ParamField path="storage" type="Option<Box<dyn StorageBackend>>">
+  Optional persistent storage backend
+</ParamField>
+
+<ParamField path="logs" type="Vec<u64>">
+  Values logged during execution
+</ParamField>
+
+## Methods
+
+### new
+
+Create a new VM with the given bytecode and gas limit.
+
+```rust
+pub fn new(
+    bytecode: Vec<u8>,
+    gas_limit: u64,
+    caller: Address,
+    address: Address,
+    call_value: u64,
+) -> Self
+```
+
+<ParamField path="bytecode" type="Vec<u8>" required>
+  Bytecode to execute
+</ParamField>
+
+<ParamField path="gas_limit" type="u64" required>
+  Maximum gas allowed for execution
+</ParamField>
+
+<ParamField path="caller" type="Address" required>
+  Address of the calling account
+</ParamField>
+
+<ParamField path="address" type="Address" required>
+  Address of the current contract
+</ParamField>
+
+<ParamField path="call_value" type="u64" required>
+  Value sent with the call
+</ParamField>
+
+<ResponseField name="vm" type="Vm">
+  A new VM instance with 1MB memory limit and default block context
+</ResponseField>
+
+### new_with_context
+
+Create a new VM with additional context fields.
+
+```rust
+pub fn new_with_context(
+    bytecode: Vec<u8>,
+    gas_limit: u64,
+    caller: Address,
+    address: Address,
+    call_value: u64,
+    block_number: u64,
+    timestamp: u64,
+) -> Self
+```
+
+<ParamField path="block_number" type="u64" required>
+  Current block number
+</ParamField>
+
+<ParamField path="timestamp" type="u64" required>
+  Current block timestamp
+</ParamField>
+
+### run
+
+Run the VM until it halts or runs out of gas.
+
+```rust
+pub fn run(&mut self) -> Result<ExecutionResult, VmError>
+```
+
+<ResponseField name="result" type="ExecutionResult">
+  Execution result containing success status, gas used, return data, and logs
+</ResponseField>
+
+**Returns**: `Result<ExecutionResult, VmError>` - Success result or error
+
+### set_storage
+
+Set the storage backend for persistent state.
+
+```rust
+pub fn set_storage(&mut self, storage: Box<dyn StorageBackend>)
+```
+
+<ParamField path="storage" type="Box<dyn StorageBackend>" required>
+  Storage backend implementing SLOAD/SSTORE operations
+</ParamField>
+
+### set_block_context
+
+Set the block context for execution.
+
+```rust
+pub fn set_block_context(&mut self, block_number: u64, timestamp: u64)
+```
+
+<ParamField path="block_number" type="u64" required>
+  Block number
+</ParamField>
+
+<ParamField path="timestamp" type="u64" required>
+  Block timestamp
+</ParamField>
+
+### get_registers
+
+Get current register values for inspection or tracing.
+
+```rust
+pub fn get_registers(&self) -> &[u64; 16]
+```
+
+<ResponseField name="registers" type="&[u64; 16]">
+  Array of 16 register values
+</ResponseField>
+
+### gas_remaining
+
+Get remaining gas.
+
+```rust
+pub fn gas_remaining(&self) -> u64
+```
+
+<ResponseField name="gas" type="u64">
+  Amount of gas remaining
+</ResponseField>
+
+## ExecutionResult
+
+Result of VM execution.
+
+<ResponseField name="success" type="bool">
+  Whether execution completed successfully (true) or failed (false)
+</ResponseField>
+
+<ResponseField name="gas_used" type="u64">
+  Total gas consumed during execution
+</ResponseField>
+
+<ResponseField name="return_data" type="Vec<u8>">
+  Data returned by the execution
+</ResponseField>
+
+<ResponseField name="logs" type="Vec<u64>">
+  Values logged via LOG opcode
+</ResponseField>
+
+## VmError
+
+Errors that can occur during execution.
+
+### Variants
+
+<ResponseField name="OutOfGas" type="{ required: u64, remaining: u64 }">
+  Insufficient gas to continue execution
+</ResponseField>
+
+<ResponseField name="InvalidOpcode" type="u8">
+  Unknown opcode byte encountered
+</ResponseField>
+
+<ResponseField name="DivisionByZero">
+  Attempted division or modulo by zero
+</ResponseField>
+
+<ResponseField name="MemoryOverflow">
+  Memory access beyond 1MB limit
+</ResponseField>
+
+<ResponseField name="InvalidJump" type="usize">
+  Jump to invalid bytecode position
+</ResponseField>
+
+<ResponseField name="StackUnderflow">
+  Attempted to pop from empty stack
+</ResponseField>
+
+<ResponseField name="Reverted">
+  Execution explicitly reverted via REVERT opcode
+</ResponseField>
+
+## StorageBackend Trait
+
+Interface for persistent storage operations.
+
+### sload
+
+Read 32 bytes from storage slot.
+
+```rust
+fn sload(&self, key: &[u8; 32]) -> [u8; 32]
+```
+
+<ParamField path="key" type="&[u8; 32]" required>
+  32-byte storage key
+</ParamField>
+
+<ResponseField name="value" type="[u8; 32]">
+  32-byte value at the storage slot
+</ResponseField>
+
+### sstore
+
+Write 32 bytes to storage slot.
+
+```rust
+fn sstore(&mut self, key: &[u8; 32], value: &[u8; 32])
+```
+
+<ParamField path="key" type="&[u8; 32]" required>
+  32-byte storage key
+</ParamField>
+
+<ParamField path="value" type="&[u8; 32]" required>
+  32-byte value to store
+</ParamField>
+
+## Usage Example
+
+```rust
+use minichain_vm::{Vm, VmError};
+use minichain_core::Address;
+
+// Simple bytecode: ADD R0, R1, R2; HALT
+let bytecode = vec![
+    0x10, 0x01, 0x20,  // ADD R0, R1, R2
+    0x00,              // HALT
+];
+
+// Create VM with 100,000 gas
+let mut vm = Vm::new(
+    bytecode,
+    100_000,
+    Address::zero(),
+    Address::zero(),
+    0,
+);
+
+// Run execution
+match vm.run() {
+    Ok(result) => {
+        println!("Success: {}", result.success);
+        println!("Gas used: {}", result.gas_used);
+        println!("Registers: {:?}", vm.get_registers());
+    }
+    Err(e) => {
+        eprintln!("Error: {:?}", e);
+    }
+}
+```
+
+## Advanced Example with Storage
+
+```rust
+use minichain_vm::{Vm, StorageBackend};
+use std::collections::HashMap;
+
+// Simple in-memory storage backend
+struct MemoryStorage {
+    data: HashMap<[u8; 32], [u8; 32]>,
+}
+
+impl StorageBackend for MemoryStorage {
+    fn sload(&self, key: &[u8; 32]) -> [u8; 32] {
+        self.data.get(key).copied().unwrap_or([0u8; 32])
+    }
+
+    fn sstore(&mut self, key: &[u8; 32], value: &[u8; 32]) {
+        self.data.insert(*key, *value);
+    }
+}
+
+let mut vm = Vm::new(bytecode, 1_000_000, caller, address, 0);
+vm.set_storage(Box::new(MemoryStorage {
+    data: HashMap::new(),
+}));
+vm.set_block_context(12345, 1234567890);
+
+let result = vm.run()?;
+```

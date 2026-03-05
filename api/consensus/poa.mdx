@@ -1,0 +1,308 @@
+---
+title: 'PoA Consensus'
+description: 'Proof of Authority consensus implementation with round-robin block production'
+icon: 'shield-check'
+---
+
+# Proof of Authority (PoA) Consensus
+
+The PoA consensus module provides a complete Proof of Authority implementation where a fixed set of pre-approved authorities (validators) take turns producing blocks in a round-robin fashion. This is efficient and deterministic, making it ideal for private/consortium blockchains and educational purposes.
+
+## Core Types
+
+### PoAConfig
+
+Configuration for the Proof of Authority consensus mechanism.
+
+<ParamField path="authorities" type="Vec<Address>" required>
+  List of authority addresses that can produce blocks. These are the pre-approved validators.
+</ParamField>
+
+<ParamField path="block_time" type="u64" default="5">
+  Block time target in seconds (e.g., 5 seconds per block).
+</ParamField>
+
+<ParamField path="max_clock_drift" type="u64" default="30">
+  Maximum allowed clock drift in seconds for timestamp validation.
+</ParamField>
+
+#### Methods
+
+##### `new(authorities: Vec<Address>, block_time: u64) -> Self`
+
+Creates a new PoA configuration with the given authorities and block time.
+
+```rust
+use minichain_consensus::PoAConfig;
+use minichain_core::Address;
+
+let addr1 = Address::from_bytes([1u8; 20]);
+let addr2 = Address::from_bytes([2u8; 20]);
+let config = PoAConfig::new(vec![addr1, addr2], 5);
+```
+
+##### `is_authority(&self, address: &Address) -> bool`
+
+Checks if an address is registered as an authority.
+
+##### `authority_count(&self) -> usize`
+
+Returns the number of configured authorities.
+
+##### `authority_at_height(&self, height: u64) -> Result<Address>`
+
+Calculates which authority should produce a block at a given height using round-robin selection: `height % authority_count`.
+
+```rust
+let config = PoAConfig::new(vec![addr1, addr2, addr3], 5);
+
+// Round-robin selection
+assert_eq!(config.authority_at_height(0).unwrap(), addr1);
+assert_eq!(config.authority_at_height(1).unwrap(), addr2);
+assert_eq!(config.authority_at_height(2).unwrap(), addr3);
+assert_eq!(config.authority_at_height(3).unwrap(), addr1); // Wraps around
+```
+
+---
+
+### Authority
+
+Authority management for PoA consensus, including block verification and signature validation.
+
+#### Methods
+
+##### `new(config: PoAConfig) -> Self`
+
+Creates a new Authority manager with the given configuration.
+
+```rust
+use minichain_consensus::{PoAConfig, Authority};
+
+let config = PoAConfig::new(vec![addr1, addr2], 5);
+let mut authority = Authority::new(config);
+```
+
+##### `register_public_key(&mut self, address: Address, public_key: PublicKey)`
+
+Registers a public key for an authority address. This is required for signature verification.
+
+```rust
+authority.register_public_key(addr1, keypair1.public_key.clone());
+authority.register_public_key(addr2, keypair2.public_key.clone());
+```
+
+##### `get_public_key(&self, address: &Address) -> Option<&PublicKey>`
+
+Retrieves the public key for an authority address.
+
+##### `config(&self) -> &PoAConfig`
+
+Returns a reference to the configuration.
+
+##### `is_authority(&self, address: &Address) -> bool`
+
+Checks if an address is an authority.
+
+##### `verify_block_authority(&self, block: &Block) -> Result<()>`
+
+Verifies that a block was produced by the correct authority:
+- Checks if the author is an authority
+- Checks if it's this authority's turn based on block height
+
+```rust
+let block = Block::new(1, prev_hash, transactions, state_root, addr1);
+authority.verify_block_authority(&block)?;
+```
+
+##### `verify_block_signature(&self, block: &Block) -> Result<()>`
+
+Verifies the block signature using the author's registered public key.
+
+##### `verify_block_timestamp(&self, block: &Block, parent_timestamp: u64, now: u64) -> Result<()>`
+
+Verifies the block timestamp is valid:
+- Block timestamp must be after parent
+- Block timestamp cannot be too far in the future (respects `max_clock_drift`)
+
+##### `verify_block(&self, block: &Block, parent_timestamp: u64) -> Result<()>`
+
+Performs full consensus verification:
+1. Verifies authority (correct turn)
+2. Verifies signature
+3. Verifies timestamp
+
+```rust
+let now = BlockHeader::current_timestamp();
+authority.verify_block(&block, parent_timestamp)?;
+```
+
+---
+
+### BlockProposer
+
+Block proposer for authorities to create and sign new blocks.
+
+#### Methods
+
+##### `new(keypair: Keypair, config: PoAConfig) -> Self`
+
+Creates a new block proposer with the given keypair and configuration.
+
+```rust
+use minichain_consensus::{BlockProposer, PoAConfig};
+use minichain_core::Keypair;
+
+let keypair = Keypair::generate();
+let config = PoAConfig::new(vec![keypair.address()], 5);
+let proposer = BlockProposer::new(keypair, config);
+```
+
+##### `address(&self) -> Address`
+
+Returns the proposer's address.
+
+##### `can_propose_at_height(&self, height: u64) -> Result<bool>`
+
+Checks if this proposer can produce a block at the given height.
+
+```rust
+if proposer.can_propose_at_height(height)? {
+    let block = proposer.propose_block(height, prev_hash, txs, state_root)?;
+}
+```
+
+##### `propose_block(&self, height: u64, prev_hash: Hash, transactions: Vec<Transaction>, state_root: Hash) -> Result<Block>`
+
+Proposes a new block (creates and signs it). Returns an error if it's not this proposer's turn.
+
+<ParamField path="height" type="u64" required>
+  Block height
+</ParamField>
+
+<ParamField path="prev_hash" type="Hash" required>
+  Hash of the parent block
+</ParamField>
+
+<ParamField path="transactions" type="Vec<Transaction>" required>
+  Transactions to include in the block
+</ParamField>
+
+<ParamField path="state_root" type="Hash" required>
+  Merkle root of the state tree
+</ParamField>
+
+```rust
+let block = proposer.propose_block(
+    height,
+    prev_hash,
+    transactions,
+    state_root,
+)?;
+```
+
+---
+
+## Errors
+
+### ConsensusError
+
+Errors that can occur during consensus operations.
+
+<ResponseField name="UnauthorizedAuthority" type="Address">
+  The block author is not in the authority set.
+</ResponseField>
+
+<ResponseField name="InvalidSignature" type="()">
+  The block signature verification failed.
+</ResponseField>
+
+<ResponseField name="NotTurn" type="{ expected: Address, got: Address }">
+  It's not this authority's turn to produce a block.
+</ResponseField>
+
+<ResponseField name="TimestampTooFuture" type="()">
+  Block timestamp is too far in the future.
+</ResponseField>
+
+<ResponseField name="TimestampTooEarly" type="()">
+  Block timestamp is earlier than parent.
+</ResponseField>
+
+<ResponseField name="NoAuthorities" type="()">
+  No authorities are configured.
+</ResponseField>
+
+---
+
+## Complete Example
+
+```rust
+use minichain_consensus::{PoAConfig, Authority, BlockProposer};
+use minichain_core::{Keypair, Block, Hash};
+
+// Setup authorities
+let keypair1 = Keypair::generate();
+let keypair2 = Keypair::generate();
+let config = PoAConfig::new(
+    vec![keypair1.address(), keypair2.address()],
+    5  // 5 second block time
+);
+
+// Create authority manager
+let mut authority = Authority::new(config.clone());
+authority.register_public_key(keypair1.address(), keypair1.public_key.clone());
+authority.register_public_key(keypair2.address(), keypair2.public_key.clone());
+
+// Propose a block (authority 1's turn at height 0)
+let proposer = BlockProposer::new(keypair1, config);
+let block = proposer.propose_block(
+    0,
+    Hash::ZERO,
+    vec![],
+    Hash::ZERO,
+)?;
+
+// Verify the block
+authority.verify_block(&block, 0)?;
+
+println!("Block produced and verified successfully!");
+```
+
+---
+
+## How It Works
+
+### Round-Robin Selection
+
+PoA uses a simple round-robin algorithm to determine which authority produces each block:
+
+```rust
+let authority_index = height % authorities.len();
+let authority = authorities[authority_index];
+```
+
+This ensures:
+- Predictable block production
+- Fair distribution among authorities
+- Deterministic verification
+
+### Block Verification Process
+
+1. **Authority Check**: Verify the author is in the authority set
+2. **Turn Check**: Verify it's this authority's turn based on block height
+3. **Signature Check**: Verify the block signature with the authority's public key
+4. **Timestamp Check**: Verify the timestamp is valid (after parent, not too far in future)
+
+### Advantages
+
+- **Fast**: No mining, instant block production
+- **Predictable**: Deterministic block production schedule
+- **Simple**: Easy to understand and implement
+- **Efficient**: Low computational requirements
+
+### Use Cases
+
+- Private/consortium blockchains
+- Development and testing environments
+- Educational blockchain implementations
+- Applications requiring fast finality

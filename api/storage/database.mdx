@@ -1,0 +1,463 @@
+---
+title: 'Storage'
+description: 'Core database wrapper for persistent key-value storage'
+---
+
+## Overview
+
+The `Storage` struct is a wrapper around the [sled](https://github.com/spacejam/sled) embedded database, providing serialization helpers and key construction utilities for the Minichain blockchain.
+
+## Storage
+
+Core database wrapper with automatic serialization/deserialization.
+
+### Constructor Methods
+
+<ParamField path="Storage::open" type="fn">
+  Opens a database at the specified path.
+
+  ```rust
+  pub fn open<P: AsRef<Path>>(path: P) -> Result<Self>
+  ```
+
+  <ParamField path="path" type="P: AsRef<Path>" required>
+    File system path where the database will be stored
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Storage>">
+    Returns a Storage instance or StorageError on failure
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  use minichain_storage::Storage;
+
+  let storage = Storage::open("./blockchain_data")?;
+  ```
+</ParamField>
+
+<ParamField path="Storage::open_temporary" type="fn">
+  Opens an in-memory database for testing.
+
+  ```rust
+  pub fn open_temporary() -> Result<Self>
+  ```
+
+  <ResponseField name="Result" type="Result<Storage>">
+    Returns a temporary Storage instance that will be deleted when dropped
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  use minichain_storage::Storage;
+
+  let storage = Storage::open_temporary()?;
+  // Perfect for unit tests
+  ```
+</ParamField>
+
+### Data Operations
+
+<ParamField path="Storage::put" type="fn">
+  Stores a serializable value with automatic encoding.
+
+  ```rust
+  pub fn put<K, V>(&self, key: K, value: &V) -> Result<()>
+  where
+      K: AsRef<[u8]>,
+      V: serde::Serialize
+  ```
+
+  <ParamField path="key" type="K: AsRef<[u8]>" required>
+    Key for storage (string or byte slice)
+  </ParamField>
+
+  <ParamField path="value" type="&V: Serialize" required>
+    Value to serialize and store
+  </ParamField>
+
+  **Example:**
+  ```rust
+  storage.put("balance", &1000u64)?;
+  storage.put(b"account:alice", &account)?;
+  ```
+</ParamField>
+
+<ParamField path="Storage::get" type="fn">
+  Retrieves and deserializes a value.
+
+  ```rust
+  pub fn get<K, V>(&self, key: K) -> Result<Option<V>>
+  where
+      K: AsRef<[u8]>,
+      V: serde::de::DeserializeOwned
+  ```
+
+  <ParamField path="key" type="K: AsRef<[u8]>" required>
+    Key to retrieve
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Option<V>>">
+    Returns Some(value) if found, None if missing, or error on deserialization failure
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  let balance: Option<u64> = storage.get("balance")?;
+  match balance {
+      Some(b) => println!("Balance: {}", b),
+      None => println!("No balance found"),
+  }
+  ```
+</ParamField>
+
+<ParamField path="Storage::get_or_err" type="fn">
+  Retrieves a value, returning error if not found.
+
+  ```rust
+  pub fn get_or_err<K, V>(&self, key: K) -> Result<V>
+  where
+      K: AsRef<[u8]> + std::fmt::Debug + Clone,
+      V: serde::de::DeserializeOwned
+  ```
+
+  <ParamField path="key" type="K: AsRef<[u8]>" required>
+    Key to retrieve (must be Debug + Clone for error reporting)
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<V>">
+    Returns the value or StorageError::NotFound
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  // Fails with clear error if key doesn't exist
+  let balance: u64 = storage.get_or_err("balance")?;
+  ```
+</ParamField>
+
+<ParamField path="Storage::delete" type="fn">
+  Deletes a key from storage.
+
+  ```rust
+  pub fn delete<K: AsRef<[u8]>>(&self, key: K) -> Result<()>
+  ```
+
+  <ParamField path="key" type="K: AsRef<[u8]>" required>
+    Key to delete
+  </ParamField>
+
+  **Example:**
+  ```rust
+  storage.delete("old_key")?;
+  ```
+</ParamField>
+
+<ParamField path="Storage::contains" type="fn">
+  Checks if a key exists in storage.
+
+  ```rust
+  pub fn contains<K: AsRef<[u8]>>(&self, key: K) -> Result<bool>
+  ```
+
+  <ParamField path="key" type="K: AsRef<[u8]>" required>
+    Key to check
+  </ParamField>
+
+  **Example:**
+  ```rust
+  if storage.contains("balance")? {
+      println!("Balance exists");
+  }
+  ```
+</ParamField>
+
+### Batch Operations
+
+<ParamField path="Storage::batch" type="fn">
+  Applies multiple operations atomically using sled's write-ahead log.
+
+  ```rust
+  pub fn batch(&self, operations: Vec<BatchOp>) -> Result<()>
+  ```
+
+  <ParamField path="operations" type="Vec<BatchOp>" required>
+    Vector of insert or remove operations
+  </ParamField>
+
+  **Example:**
+  ```rust
+  use minichain_storage::BatchOp;
+
+  let ops = vec![
+      BatchOp::Insert {
+          key: b"key1".to_vec(),
+          value: bincode::serialize(&100u64)?,
+      },
+      BatchOp::Remove {
+          key: b"key2".to_vec(),
+      },
+  ];
+  storage.batch(ops)?;
+  ```
+</ParamField>
+
+<ParamField path="Storage::flush" type="fn">
+  Flushes all pending writes to disk.
+
+  ```rust
+  pub fn flush(&self) -> Result<()>
+  ```
+
+  **Example:**
+  ```rust
+  storage.flush()?; // Ensure durability
+  ```
+</ParamField>
+
+### Key Construction Helpers
+
+These methods generate standardized keys for different data types.
+
+<ParamField path="Storage::account_key" type="fn">
+  Creates a prefixed key for accounts.
+
+  ```rust
+  pub fn account_key(address: &Address) -> Vec<u8>
+  ```
+
+  **Format:** `"account:" + address_bytes`
+
+  **Example:**
+  ```rust
+  use minichain_core::Address;
+
+  let alice = Address([0xAA; 20]);
+  let key = Storage::account_key(&alice);
+  // key = b"account:\xAA\xAA\xAA..."
+  ```
+</ParamField>
+
+<ParamField path="Storage::block_height_key" type="fn">
+  Creates a prefixed key for blocks by height.
+
+  ```rust
+  pub fn block_height_key(height: u64) -> Vec<u8>
+  ```
+
+  **Format:** `"block:height:{height}"`
+
+  **Example:**
+  ```rust
+  let key = Storage::block_height_key(42);
+  // key = b"block:height:42"
+  ```
+</ParamField>
+
+<ParamField path="Storage::block_hash_key" type="fn">
+  Creates a prefixed key for blocks by hash.
+
+  ```rust
+  pub fn block_hash_key(hash: &Hash) -> Vec<u8>
+  ```
+
+  **Format:** `"block:hash:" + hash_bytes`
+
+  **Example:**
+  ```rust
+  use minichain_core::Hash;
+
+  let hash = Hash([0xBB; 32]);
+  let key = Storage::block_hash_key(&hash);
+  ```
+</ParamField>
+
+<ParamField path="Storage::contract_storage_key" type="fn">
+  Creates a prefixed key for contract storage slots.
+
+  ```rust
+  pub fn contract_storage_key(contract: &Address, slot: &[u8]) -> Vec<u8>
+  ```
+
+  **Format:** `"storage:" + contract_address + ":" + slot`
+
+  **Example:**
+  ```rust
+  let contract = Address([0xCC; 20]);
+  let slot = [0u8; 32];
+  let key = Storage::contract_storage_key(&contract, &slot);
+  ```
+</ParamField>
+
+<ParamField path="Storage::code_key" type="fn">
+  Creates a prefixed key for contract code.
+
+  ```rust
+  pub fn code_key(code_hash: &Hash) -> String
+  ```
+
+  **Format:** `"code:{code_hash_hex}"`
+
+  **Example:**
+  ```rust
+  let code_hash = hash(b"contract bytecode");
+  let key = Storage::code_key(&code_hash);
+  // key = "code:a1b2c3..."
+  ```
+</ParamField>
+
+### Advanced Access
+
+<ParamField path="Storage::inner" type="fn">
+  Gets the underlying sled database for advanced operations.
+
+  ```rust
+  pub fn inner(&self) -> &Db
+  ```
+
+  **Example:**
+  ```rust
+  // Use sled's scan_prefix for iteration
+  for result in storage.inner().scan_prefix(b"account:") {
+      let (key, value) = result?;
+      // Process each account...
+  }
+  ```
+</ParamField>
+
+## BatchOp
+
+Represents a single operation in an atomic batch.
+
+```rust
+pub enum BatchOp {
+    Insert { key: Vec<u8>, value: Vec<u8> },
+    Remove { key: Vec<u8> },
+}
+```
+
+### Variants
+
+<ResponseField name="Insert" type="variant">
+  Inserts or updates a key-value pair
+  
+  <ParamField path="key" type="Vec<u8>" required>
+    Key to insert
+  </ParamField>
+  
+  <ParamField path="value" type="Vec<u8>" required>
+    Pre-serialized value bytes
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="Remove" type="variant">
+  Removes a key
+  
+  <ParamField path="key" type="Vec<u8>" required>
+    Key to remove
+  </ParamField>
+</ResponseField>
+
+## StorageError
+
+Errors that can occur during storage operations.
+
+```rust
+pub enum StorageError {
+    Database(sled::Error),
+    Serialization(bincode::Error),
+    NotFound(String),
+    InsufficientBalance { address: Address, required: u64, available: u64 },
+    InvalidGenesis(String),
+    InvalidStorageValue,
+}
+```
+
+### Variants
+
+<ResponseField name="Database" type="variant">
+  Underlying sled database error
+</ResponseField>
+
+<ResponseField name="Serialization" type="variant">
+  Bincode serialization/deserialization error
+</ResponseField>
+
+<ResponseField name="NotFound" type="variant">
+  Key not found in database
+</ResponseField>
+
+<ResponseField name="InsufficientBalance" type="variant">
+  Account doesn't have enough balance for operation
+  
+  <ParamField path="address" type="Address">
+    Account address
+  </ParamField>
+  
+  <ParamField path="required" type="u64">
+    Amount required
+  </ParamField>
+  
+  <ParamField path="available" type="u64">
+    Amount available
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="InvalidGenesis" type="variant">
+  Genesis block validation error
+</ResponseField>
+
+<ResponseField name="InvalidStorageValue" type="variant">
+  Contract storage value has invalid format
+</ResponseField>
+
+## Result Type
+
+```rust
+pub type Result<T> = std::result::Result<T, StorageError>;
+```
+
+Convenience type alias for storage operations.
+
+## Complete Example
+
+```rust
+use minichain_storage::{Storage, BatchOp};
+use minichain_core::Address;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Open database
+    let storage = Storage::open("./my_blockchain")?;
+
+    // Store some data
+    let alice = Address([0xAA; 20]);
+    storage.put(Storage::account_key(&alice), &1000u64)?;
+
+    // Retrieve it
+    let balance: u64 = storage.get_or_err(Storage::account_key(&alice))?;
+    println!("Alice's balance: {}", balance);
+
+    // Batch operations
+    let ops = vec![
+        BatchOp::Insert {
+            key: b"key1".to_vec(),
+            value: bincode::serialize(&42u64)?,
+        },
+        BatchOp::Insert {
+            key: b"key2".to_vec(),
+            value: bincode::serialize(&100u64)?,
+        },
+    ];
+    storage.batch(ops)?;
+
+    // Flush to disk
+    storage.flush()?;
+
+    Ok(())
+}
+```
+
+## See Also
+
+- [StateManager](/api/storage/state) - Account and contract state management
+- [ChainStore](/api/storage/chain) - Block storage and chain operations

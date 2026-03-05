@@ -1,0 +1,494 @@
+---
+title: Merkle
+description: Merkle tree implementation for transaction verification
+---
+
+The `merkle` module provides Merkle tree functionality for efficient transaction verification and state commitment in the blockchain.
+
+## Overview
+
+Merkle trees allow efficient and secure verification that a transaction is included in a block without downloading all transactions. This module implements binary Merkle trees with Blake3 hashing.
+
+## Types
+
+### MerkleTree
+
+```rust
+pub struct MerkleTree {
+    levels: Vec<Vec<Hash>>,
+}
+```
+
+A Merkle tree for efficient proofs.
+
+<ParamField path="levels" type="Vec<Vec<Hash>>">
+  All nodes in the tree, level by level (leaves first, root last).
+</ParamField>
+
+#### Constructors
+
+<ResponseField name="new" type="fn(leaves: &[Hash]) -> Self">
+  Builds a Merkle tree from a list of leaf hashes.
+  
+  ```rust
+  use minichain_core::merkle::MerkleTree;
+  use minichain_core::hash::hash;
+  
+  // Create some leaf hashes
+  let leaves = vec![
+      hash(b"tx1"),
+      hash(b"tx2"),
+      hash(b"tx3"),
+      hash(b"tx4"),
+  ];
+  
+  // Build the tree
+  let tree = MerkleTree::new(&leaves);
+  println!("Merkle root: {}", tree.root().to_hex());
+  ```
+  
+  <ParamField path="leaves" type="&[Hash]">
+    Array of leaf hashes (typically transaction hashes)
+  </ParamField>
+</ResponseField>
+
+#### Methods
+
+<ResponseField name="root" type="fn(&self) -> Hash">
+  Gets the root hash of the Merkle tree.
+  
+  ```rust
+  let tree = MerkleTree::new(&leaves);
+  let root = tree.root();
+  ```
+</ResponseField>
+
+<ResponseField name="leaf_count" type="fn(&self) -> usize">
+  Gets the number of leaves in the tree.
+  
+  ```rust
+  let tree = MerkleTree::new(&leaves);
+  assert_eq!(tree.leaf_count(), leaves.len());
+  ```
+</ResponseField>
+
+<ResponseField name="proof" type="fn(&self, index: usize) -> Option<MerkleProof>">
+  Generates a Merkle proof for the leaf at the given index.
+  
+  Returns `None` if the index is out of bounds.
+  
+  ```rust
+  let tree = MerkleTree::new(&leaves);
+  let proof = tree.proof(2).unwrap();
+  assert!(tree.verify_proof(&proof));
+  ```
+  
+  <ParamField path="index" type="usize">
+    Zero-based index of the leaf to prove
+  </ParamField>
+</ResponseField>
+
+<ResponseField name="verify_proof" type="fn(&self, proof: &MerkleProof) -> bool">
+  Verifies a Merkle proof against this tree's root.
+  
+  ```rust
+  let tree = MerkleTree::new(&leaves);
+  let proof = tree.proof(0).unwrap();
+  assert!(tree.verify_proof(&proof));
+  ```
+  
+  <ParamField path="proof" type="&MerkleProof">
+    The proof to verify
+  </ParamField>
+</ResponseField>
+
+### MerkleProof
+
+```rust
+pub struct MerkleProof {
+    pub leaf: Hash,
+    pub siblings: Vec<Hash>,
+    pub directions: Vec<bool>,
+}
+```
+
+A Merkle proof for a single leaf.
+
+<ParamField path="leaf" type="Hash">
+  The leaf hash being proven.
+</ParamField>
+
+<ParamField path="siblings" type="Vec<Hash>">
+  Sibling hashes from leaf to root (one per level).
+</ParamField>
+
+<ParamField path="directions" type="Vec<bool>">
+  Direction for each sibling (true = sibling is on right, false = sibling is on left).
+</ParamField>
+
+## Functions
+
+### merkle_root
+
+```rust
+pub fn merkle_root(hashes: &[Hash]) -> Hash
+```
+
+Computes the Merkle root of a list of hashes.
+
+<ParamField path="hashes" type="&[Hash]">
+  Array of hashes to build the tree from
+</ParamField>
+
+<ResponseField name="returns" type="Hash">
+  The Merkle root hash. Returns `Hash::ZERO` if the list is empty.
+</ResponseField>
+
+#### Example
+
+```rust
+use minichain_core::merkle::merkle_root;
+use minichain_core::hash::hash;
+
+let hashes = vec![
+    hash(b"data1"),
+    hash(b"data2"),
+    hash(b"data3"),
+];
+
+let root = merkle_root(&hashes);
+println!("Merkle root: {}", root.to_hex());
+```
+
+### verify_proof
+
+```rust
+pub fn verify_proof(root: &Hash, proof: &MerkleProof) -> bool
+```
+
+Verifies a Merkle proof against a given root.
+
+<ParamField path="root" type="&Hash">
+  The expected Merkle root
+</ParamField>
+
+<ParamField path="proof" type="&MerkleProof">
+  The proof to verify
+</ParamField>
+
+<ResponseField name="returns" type="bool">
+  `true` if the proof is valid, `false` otherwise
+</ResponseField>
+
+#### Example
+
+```rust
+use minichain_core::merkle::{MerkleTree, verify_proof};
+
+let tree = MerkleTree::new(&leaves);
+let proof = tree.proof(0).unwrap();
+let root = tree.root();
+
+assert!(verify_proof(&root, &proof));
+```
+
+## Usage Examples
+
+### Basic Merkle Tree
+
+```rust
+use minichain_core::merkle::{MerkleTree, merkle_root};
+use minichain_core::hash::hash;
+
+// Create transaction hashes
+let tx_hashes = vec![
+    hash(b"tx1: alice -> bob: 100"),
+    hash(b"tx2: bob -> charlie: 50"),
+    hash(b"tx3: charlie -> alice: 25"),
+    hash(b"tx4: alice -> dave: 75"),
+];
+
+// Quick root calculation
+let root = merkle_root(&tx_hashes);
+println!("Merkle root: {}", root.to_hex());
+
+// Full tree for proofs
+let tree = MerkleTree::new(&tx_hashes);
+assert_eq!(tree.root(), root);
+assert_eq!(tree.leaf_count(), 4);
+```
+
+### Generating and Verifying Proofs
+
+```rust
+use minichain_core::merkle::MerkleTree;
+use minichain_core::hash::hash;
+
+// Build tree from transactions
+let tx_hashes = vec![
+    hash(b"tx1"),
+    hash(b"tx2"),
+    hash(b"tx3"),
+    hash(b"tx4"),
+];
+
+let tree = MerkleTree::new(&tx_hashes);
+
+// Generate proof for transaction at index 2
+let proof = tree.proof(2).unwrap();
+
+println!("Proving leaf at index 2");
+println!("Leaf: {}", proof.leaf.to_hex());
+println!("Proof size: {} siblings", proof.siblings.len());
+
+// Verify the proof
+assert!(tree.verify_proof(&proof));
+println!("✓ Proof verified!");
+```
+
+### Lightweight Client Verification
+
+```rust
+use minichain_core::merkle::{MerkleProof, verify_proof};
+use minichain_core::hash::Hash;
+
+// Lightweight client only has:
+// 1. The block's merkle root (from block header)
+// 2. A merkle proof for a specific transaction
+
+let block_merkle_root: Hash = /* from block header */;
+let transaction_proof: MerkleProof = /* received from full node */;
+
+// Verify the transaction was included in the block
+if verify_proof(&block_merkle_root, &transaction_proof) {
+    println!("✓ Transaction confirmed in block");
+} else {
+    println!("✗ Transaction not in block or proof invalid");
+}
+```
+
+### Odd Number of Leaves
+
+```rust
+use minichain_core::merkle::MerkleTree;
+use minichain_core::hash::hash;
+
+// Merkle trees handle odd numbers of leaves
+// by duplicating the last leaf when pairing
+let leaves = vec![
+    hash(b"tx1"),
+    hash(b"tx2"),
+    hash(b"tx3"),  // This will be paired with itself
+];
+
+let tree = MerkleTree::new(&leaves);
+
+// Can still generate proofs for all leaves
+for i in 0..leaves.len() {
+    let proof = tree.proof(i).unwrap();
+    assert!(tree.verify_proof(&proof));
+}
+```
+
+### Empty and Single-Leaf Trees
+
+```rust
+use minichain_core::merkle::{merkle_root, MerkleTree};
+use minichain_core::hash::{hash, Hash};
+
+// Empty tree
+let empty_root = merkle_root(&[]);
+assert_eq!(empty_root, Hash::ZERO);
+
+// Single leaf
+let single = vec![hash(b"only tx")];
+let single_root = merkle_root(&single);
+assert_eq!(single_root, single[0]);  // Root equals the leaf
+
+let tree = MerkleTree::new(&single);
+assert_eq!(tree.root(), single[0]);
+```
+
+### Transaction Inclusion Proof
+
+```rust
+use minichain_core::{Block, Transaction};
+use minichain_core::merkle::MerkleTree;
+use minichain_core::crypto::Keypair;
+
+// Create a block with transactions
+let authority = Keypair::generate();
+let alice = Keypair::generate();
+let bob = Keypair::generate();
+
+let tx1 = Transaction::transfer(alice.address(), bob.address(), 100, 0, 1)
+    .signed(&alice);
+let tx2 = Transaction::transfer(bob.address(), alice.address(), 50, 0, 1)
+    .signed(&bob);
+
+let transactions = vec![tx1.clone(), tx2.clone()];
+let block = Block::new(1, prev_hash, transactions.clone(), state_root, authority.address())
+    .signed(&authority);
+
+// Build Merkle tree from transaction hashes
+let tx_hashes: Vec<_> = transactions.iter().map(|tx| tx.hash()).collect();
+let tree = MerkleTree::new(&tx_hashes);
+
+// Verify merkle root matches block header
+assert_eq!(tree.root(), block.header.merkle_root);
+
+// Generate proof that tx1 is in the block
+let proof = tree.proof(0).unwrap();
+assert_eq!(proof.leaf, tx1.hash());
+assert!(tree.verify_proof(&proof));
+
+println!("Transaction {} is proven to be in block {}", 
+         tx1.hash().to_hex(), 
+         block.hash().to_hex());
+```
+
+### Proof Size Analysis
+
+```rust
+use minichain_core::merkle::MerkleTree;
+use minichain_core::hash::hash;
+
+// Create trees of different sizes
+for size in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024] {
+    let leaves: Vec<_> = (0..size).map(|i| hash(&[i as u8])).collect();
+    let tree = MerkleTree::new(&leaves);
+    
+    // Get proof for first leaf
+    let proof = tree.proof(0).unwrap();
+    
+    println!("Tree size: {}, Proof size: {} hashes", 
+             size, 
+             proof.siblings.len());
+}
+
+// Output shows logarithmic proof size:
+// Tree size: 1, Proof size: 0 hashes
+// Tree size: 2, Proof size: 1 hashes
+// Tree size: 4, Proof size: 2 hashes
+// Tree size: 8, Proof size: 3 hashes
+// Tree size: 1024, Proof size: 10 hashes
+```
+
+### Custom Verification Logic
+
+```rust
+use minichain_core::merkle::{MerkleProof, verify_proof};
+use minichain_core::hash::{hash_concat, Hash};
+
+// Manual proof verification (equivalent to verify_proof function)
+fn manual_verify(root: &Hash, proof: &MerkleProof) -> bool {
+    let mut current = proof.leaf;
+    
+    for (sibling, is_right) in proof.siblings.iter().zip(proof.directions.iter()) {
+        current = if *is_right {
+            // Current node is on the left, sibling on the right
+            hash_concat(&[current.as_ref(), sibling.as_ref()])
+        } else {
+            // Sibling is on the left, current node on the right
+            hash_concat(&[sibling.as_ref(), current.as_ref()])
+        };
+    }
+    
+    current == *root
+}
+
+// Test it matches the built-in function
+let tree = MerkleTree::new(&leaves);
+let proof = tree.proof(0).unwrap();
+let root = tree.root();
+
+assert_eq!(verify_proof(&root, &proof), manual_verify(&root, &proof));
+```
+
+## Implementation Details
+
+### Binary Merkle Tree Structure
+
+The Merkle tree is built as a binary tree:
+
+```
+         Root
+        /    \
+      H12    H34
+     /  \   /  \
+    H1  H2 H3  H4
+    |   |  |   |
+   L1  L2 L3  L4  (leaves)
+```
+
+Each parent node is the hash of its two children concatenated together.
+
+### Building Algorithm
+
+1. Start with leaf hashes at level 0
+2. For each level:
+   - Pair adjacent nodes and hash them together
+   - If odd number of nodes, duplicate the last one
+   - Continue until one node remains (the root)
+
+```rust
+pub fn merkle_root(hashes: &[Hash]) -> Hash {
+    if hashes.is_empty() {
+        return Hash::ZERO;
+    }
+    
+    let mut current_level = hashes.to_vec();
+    
+    while current_level.len() > 1 {
+        let mut next_level = Vec::new();
+        
+        for chunk in current_level.chunks(2) {
+            let combined = if chunk.len() == 2 {
+                hash_concat(&[chunk[0].as_ref(), chunk[1].as_ref()])
+            } else {
+                hash_concat(&[chunk[0].as_ref(), chunk[0].as_ref()])
+            };
+            next_level.push(combined);
+        }
+        
+        current_level = next_level;
+    }
+    
+    current_level[0]
+}
+```
+
+### Proof Generation
+
+A Merkle proof consists of:
+- The leaf being proven
+- Sibling hashes at each level from leaf to root
+- Direction indicators (left/right)
+
+To verify, reconstruct the path from leaf to root using the siblings.
+
+### Proof Size
+
+For a tree with N leaves:
+- Proof size: O(log N) hashes
+- Verification time: O(log N) hash operations
+
+This makes Merkle trees extremely efficient for large datasets.
+
+### Security Properties
+
+- **Collision Resistance**: Infeasible to find two inputs with same hash
+- **Tamper Evidence**: Any change to a leaf changes the root
+- **Efficient Verification**: Can prove inclusion with O(log N) hashes
+- **Deterministic**: Same leaves always produce same root
+
+### Use Cases in Minichain
+
+1. **Transaction Inclusion**: Prove a transaction is in a block
+2. **Block Headers**: Commit to all transactions with a single hash
+3. **Light Clients**: Verify transactions without downloading full blocks
+4. **State Commitment**: Commit to account state efficiently
+
+## Source Location
+
+Defined in `crates/core/src/merkle.rs`

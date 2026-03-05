@@ -1,0 +1,475 @@
+---
+title: 'ChainStore'
+description: 'Block storage and chain state management'
+---
+
+## Overview
+
+The `ChainStore` manages block storage and chain state, including:
+- Storing blocks with dual indexing (by hash and height)
+- Tracking the chain head and current height
+- Genesis block initialization
+- Block retrieval and validation
+- Chain traversal operations
+
+## ChainStore
+
+Manages block storage and chain state.
+
+```rust
+pub struct ChainStore<'a> {
+    storage: &'a Storage,
+}
+```
+
+### Constructor
+
+<ParamField path="ChainStore::new" type="fn">
+  Creates a new ChainStore wrapping the given storage.
+
+  ```rust
+  pub fn new(storage: &'a Storage) -> Self
+  ```
+
+  <ParamField path="storage" type="&'a Storage" required>
+    Reference to the underlying Storage instance
+  </ParamField>
+
+  **Example:**
+  ```rust
+  use minichain_storage::{Storage, ChainStore};
+
+  let storage = Storage::open("./blockchain_data")?;
+  let chain = ChainStore::new(&storage);
+  ```
+</ParamField>
+
+## Block Storage
+
+<ParamField path="ChainStore::put_block" type="fn">
+  Stores a block with dual indexing (by hash and height).
+
+  ```rust
+  pub fn put_block(&self, block: &Block) -> Result<()>
+  ```
+
+  Creates two index entries:
+  - **Primary:** `block:hash:{hash}` → full block data (immutable)
+  - **Secondary:** `block:height:{height}` → hash (pointer, can change during reorgs)
+
+  <ParamField path="block" type="&Block" required>
+    Block to store
+  </ParamField>
+
+  **Example:**
+  ```rust
+  use minichain_core::Block;
+
+  let block = Block::new(1, prev_hash, transactions, state_root, authority);
+  chain.put_block(&block)?;
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::get_block_by_hash" type="fn">
+  Retrieves a block by its hash.
+
+  ```rust
+  pub fn get_block_by_hash(&self, hash: &Hash) -> Result<Option<Block>>
+  ```
+
+  <ParamField path="hash" type="&Hash" required>
+    Block hash
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Option<Block>>">
+    Returns Some(block) if found, None otherwise
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  use minichain_core::Hash;
+
+  let block_hash = Hash([0xBB; 32]);
+  if let Some(block) = chain.get_block_by_hash(&block_hash)? {
+      println!("Found block at height {}", block.header.height);
+  }
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::get_block_by_height" type="fn">
+  Retrieves a block by its height.
+
+  ```rust
+  pub fn get_block_by_height(&self, height: u64) -> Result<Option<Block>>
+  ```
+
+  Performs two lookups:
+  1. height → hash (secondary index)
+  2. hash → block (primary storage)
+
+  <ParamField path="height" type="u64" required>
+    Block height
+  </ParamField>
+
+  **Example:**
+  ```rust
+  // Get genesis block
+  if let Some(genesis) = chain.get_block_by_height(0)? {
+      println!("Genesis hash: {:?}", genesis.hash());
+  }
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::has_block" type="fn">
+  Checks if a block exists by hash.
+
+  ```rust
+  pub fn has_block(&self, hash: &Hash) -> Result<bool>
+  ```
+
+  <ParamField path="hash" type="&Hash" required>
+    Block hash to check
+  </ParamField>
+
+  **Example:**
+  ```rust
+  if chain.has_block(&block_hash)? {
+      println!("Block already stored");
+  } else {
+      chain.put_block(&new_block)?;
+  }
+  ```
+</ParamField>
+
+## Chain Head Tracking
+
+<ParamField path="ChainStore::get_head" type="fn">
+  Gets the current chain head hash.
+
+  ```rust
+  pub fn get_head(&self) -> Result<Option<Hash>>
+  ```
+
+  <ResponseField name="Result" type="Result<Option<Hash>>">
+    Returns Some(hash) if chain is initialized, None otherwise
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  match chain.get_head()? {
+      Some(head_hash) => println!("Chain head: {:?}", head_hash),
+      None => println!("Chain not initialized"),
+  }
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::get_height" type="fn">
+  Gets the current chain height.
+
+  ```rust
+  pub fn get_height(&self) -> Result<u64>
+  ```
+
+  <ResponseField name="Result" type="Result<u64>">
+    Returns current height, or 0 if chain is not initialized
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  let height = chain.get_height()?;
+  println!("Chain has {} blocks", height + 1);
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::set_head" type="fn">
+  Updates the chain head (called after adding a new block).
+
+  ```rust
+  pub fn set_head(&self, hash: &Hash, height: u64) -> Result<()>
+  ```
+
+  <ParamField path="hash" type="&Hash" required>
+    New head block hash
+  </ParamField>
+
+  <ParamField path="height" type="u64" required>
+    New chain height
+  </ParamField>
+
+  **Example:**
+  ```rust
+  let new_block = Block::new(height + 1, current_head, txs, state_root, authority);
+  chain.put_block(&new_block)?;
+  chain.set_head(&new_block.hash(), new_block.header.height)?;
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::get_latest_block" type="fn">
+  Gets the latest block (current head).
+
+  ```rust
+  pub fn get_latest_block(&self) -> Result<Option<Block>>
+  ```
+
+  <ResponseField name="Result" type="Result<Option<Block>>">
+    Returns the head block, or None if chain is not initialized
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  if let Some(latest) = chain.get_latest_block()? {
+      println!("Latest block: height {}, {} transactions",
+               latest.header.height,
+               latest.transactions.len());
+  }
+  ```
+</ParamField>
+
+## Genesis Block
+
+<ParamField path="ChainStore::init_genesis" type="fn">
+  Initializes the chain with a genesis block.
+
+  ```rust
+  pub fn init_genesis(&self, genesis: &Block) -> Result<()>
+  ```
+
+  Validates:
+  - Block height must be 0
+  - Chain must not already be initialized
+
+  <ParamField path="genesis" type="&Block" required>
+    Genesis block (height must be 0)
+  </ParamField>
+
+  **Returns:** `Err(StorageError::InvalidGenesis)` if validation fails.
+
+  **Example:**
+  ```rust
+  use minichain_core::{Block, Address};
+
+  let authority = Address([0xAA; 20]);
+  let genesis = Block::genesis(authority);
+  chain.init_genesis(&genesis)?;
+  
+  println!("Chain initialized at height {}", chain.get_height()?);
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::is_initialized" type="fn">
+  Checks if the chain is initialized (has a genesis block).
+
+  ```rust
+  pub fn is_initialized(&self) -> Result<bool>
+  ```
+
+  **Example:**
+  ```rust
+  if !chain.is_initialized()? {
+      println!("Initializing genesis block...");
+      chain.init_genesis(&genesis)?;
+  }
+  ```
+</ParamField>
+
+## Chain Operations
+
+<ParamField path="ChainStore::append_block" type="fn">
+  Appends a new block to the chain with validation.
+
+  ```rust
+  pub fn append_block(&self, block: &Block) -> Result<()>
+  ```
+
+  Validates:
+  - Block height is exactly `current_height + 1`
+  - Block's `prev_hash` matches the current head
+
+  <ParamField path="block" type="&Block" required>
+    Block to append
+  </ParamField>
+
+  **Note:** This does NOT validate transactions or signatures. Full validation should be done before calling this method.
+
+  **Example:**
+  ```rust
+  // Build next block
+  let current_height = chain.get_height()?;
+  let current_head = chain.get_head()?.unwrap();
+  
+  let next_block = Block::new(
+      current_height + 1,
+      current_head,
+      transactions,
+      state_root,
+      authority
+  );
+  
+  // Validate and append
+  chain.append_block(&next_block)?;
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::get_blocks_range" type="fn">
+  Gets blocks in a range [from_height, to_height].
+
+  ```rust
+  pub fn get_blocks_range(&self, from_height: u64, to_height: u64) -> Result<Vec<Block>>
+  ```
+
+  <ParamField path="from_height" type="u64" required>
+    Starting height (inclusive)
+  </ParamField>
+
+  <ParamField path="to_height" type="u64" required>
+    Ending height (inclusive)
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Vec<Block>>">
+    Returns blocks in ascending height order, stopping at first missing block
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  // Get blocks 10-20
+  let blocks = chain.get_blocks_range(10, 20)?;
+  for block in blocks {
+      println!("Block {}: {} txs", 
+               block.header.height, 
+               block.transactions.len());
+  }
+  ```
+</ParamField>
+
+<ParamField path="ChainStore::get_recent_blocks" type="fn">
+  Gets the last N blocks (most recent first).
+
+  ```rust
+  pub fn get_recent_blocks(&self, count: u64) -> Result<Vec<Block>>
+  ```
+
+  <ParamField path="count" type="u64" required>
+    Number of recent blocks to retrieve
+  </ParamField>
+
+  <ResponseField name="Result" type="Result<Vec<Block>>">
+    Returns blocks in descending height order (most recent first)
+  </ResponseField>
+
+  **Example:**
+  ```rust
+  // Get last 10 blocks
+  let recent = chain.get_recent_blocks(10)?;
+  println!("Latest block: height {}", recent[0].header.height);
+  println!("10 blocks ago: height {}", recent[9].header.height);
+  ```
+</ParamField>
+
+## Storage Keys
+
+Internal constants for chain metadata:
+
+```rust
+const CHAIN_HEAD_KEY: &[u8] = b"chain:head";
+const CHAIN_HEIGHT_KEY: &[u8] = b"chain:height";
+```
+
+These keys store the current chain head hash and height.
+
+## Complete Example
+
+```rust
+use minichain_storage::{Storage, ChainStore};
+use minichain_core::{Block, Hash, Address};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let storage = Storage::open("./blockchain_data")?;
+    let chain = ChainStore::new(&storage);
+
+    // Initialize with genesis
+    if !chain.is_initialized()? {
+        let authority = Address([0xAA; 20]);
+        let genesis = Block::genesis(authority);
+        chain.init_genesis(&genesis)?;
+        println!("Genesis initialized");
+    }
+
+    // Get current state
+    let height = chain.get_height()?;
+    let head = chain.get_head()?.unwrap();
+    println!("Chain height: {}", height);
+    println!("Chain head: {:?}", head);
+
+    // Retrieve genesis
+    let genesis = chain.get_block_by_height(0)?.unwrap();
+    println!("Genesis hash: {:?}", genesis.hash());
+
+    // Append new block
+    let authority = Address([0xAA; 20]);
+    let new_block = Block::new(
+        height + 1,
+        head,
+        vec![],  // No transactions
+        Hash::ZERO,
+        authority
+    );
+    chain.append_block(&new_block)?;
+    println!("Appended block {}", new_block.header.height);
+
+    // Get recent blocks
+    let recent = chain.get_recent_blocks(5)?;
+    println!("\nRecent blocks:");
+    for block in recent {
+        println!("  Height {}: {} txs", 
+                 block.header.height, 
+                 block.transactions.len());
+    }
+
+    Ok(())
+}
+```
+
+## Block Indexing Strategy
+
+The ChainStore uses a dual-indexing strategy:
+
+### Primary Index: Hash → Block
+```
+block:hash:{hash} → Block
+```
+- Immutable once written
+- Source of truth for block data
+- Supports lookups by hash
+
+### Secondary Index: Height → Hash
+```
+block:height:{height} → Hash
+```
+- Pointer to the primary index
+- Can be updated during reorganizations
+- Supports lookups by height
+
+This design allows:
+- Efficient lookups by both hash and height
+- Safe handling of chain reorganizations
+- Block data deduplication (same block, different forks)
+
+## Error Handling
+
+Common errors when working with ChainStore:
+
+```rust
+match chain.append_block(&block) {
+    Ok(_) => println!("Block appended"),
+    Err(StorageError::InvalidGenesis(msg)) => {
+        eprintln!("Validation failed: {}", msg);
+        // Height mismatch or prev_hash mismatch
+    }
+    Err(e) => return Err(e),
+}
+```
+
+## See Also
+
+- [Storage](/api/storage/database) - Low-level database operations
+- [StateManager](/api/storage/state) - Account and contract state management

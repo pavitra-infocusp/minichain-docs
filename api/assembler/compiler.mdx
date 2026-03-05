@@ -1,0 +1,607 @@
+---
+title: "Compiler"
+description: "Emit bytecode from AST using two-pass compilation for the Minichain assembler"
+---
+
+## Overview
+
+The compiler module converts an Abstract Syntax Tree (AST) into executable bytecode. It uses a two-pass compilation strategy:
+
+1. **First Pass**: Collect label addresses and build symbol table
+2. **Second Pass**: Emit bytecode with resolved label references
+
+This approach allows forward references where labels can be used before they are defined.
+
+## Public API
+
+### assemble
+
+```rust
+pub fn assemble(source: &str) -> Result<Vec<u8>>
+```
+
+Main entry point for assembling source code into bytecode. This function performs lexing, parsing, and compilation in a single call.
+
+<ParamField path="source" type="&str" required>
+  Assembly source code as a string
+</ParamField>
+
+<ResponseField name="Result" type="Result<Vec<u8>>">
+  Compiled bytecode or an error if assembly fails
+</ResponseField>
+
+**Example**:
+
+```rust
+use minichain_assembler::assemble;
+
+let source = r#"
+    .entry main
+    main:
+        LOADI R0, 42
+        HALT
+"#;
+
+let bytecode = assemble(source)?;
+```
+
+### assemble_with_ast
+
+```rust
+pub fn assemble_with_ast(source: &str) -> Result<(Program, Vec<u8>)>
+```
+
+Assemble source code and return both the parsed AST and compiled bytecode. Useful for debugging or when you need access to the program structure.
+
+<ParamField path="source" type="&str" required>
+  Assembly source code as a string
+</ParamField>
+
+<ResponseField name="Result" type="Result<(Program, Vec<u8>)>">
+  Tuple of (parsed program, compiled bytecode) or an error
+</ResponseField>
+
+## Compiler API
+
+### Compiler::new
+
+```rust
+pub fn new() -> Self
+```
+
+Creates a new compiler instance with empty symbol and constant tables.
+
+<ResponseField name="Compiler" type="Compiler">
+  A new compiler instance
+</ResponseField>
+
+### Compiler::compile
+
+```rust
+pub fn compile(program: &Program) -> Result<Vec<u8>>
+```
+
+Compiles a program AST to bytecode.
+
+<ParamField path="program" type="&Program" required>
+  The parsed AST program to compile
+</ParamField>
+
+<ResponseField name="Result" type="Result<Vec<u8>>">
+  Compiled bytecode as a byte vector, or compilation error
+</ResponseField>
+
+## Opcode Reference
+
+The compiler emits the following opcodes:
+
+### Control Flow (0x00-0x0F)
+
+<ParamField path="HALT" type="0x00">
+  Halt execution
+</ParamField>
+
+<ParamField path="NOP" type="0x01">
+  No operation
+</ParamField>
+
+<ParamField path="JUMP" type="0x02">
+  Unconditional jump (1 register)
+</ParamField>
+
+<ParamField path="JUMPI" type="0x03">
+  Conditional jump (2 registers)
+</ParamField>
+
+<ParamField path="CALL" type="0x04">
+  Call subroutine (1 register)
+</ParamField>
+
+<ParamField path="RET" type="0x05">
+  Return from subroutine
+</ParamField>
+
+<ParamField path="REVERT" type="0x0F">
+  Revert execution
+</ParamField>
+
+### Arithmetic (0x10-0x1F)
+
+<ParamField path="ADD" type="0x10">
+  Addition (3 registers)
+</ParamField>
+
+<ParamField path="SUB" type="0x11">
+  Subtraction (3 registers)
+</ParamField>
+
+<ParamField path="MUL" type="0x12">
+  Multiplication (3 registers)
+</ParamField>
+
+<ParamField path="DIV" type="0x13">
+  Division (3 registers)
+</ParamField>
+
+<ParamField path="MOD" type="0x14">
+  Modulo (3 registers)
+</ParamField>
+
+<ParamField path="ADDI" type="0x15">
+  Add immediate (2 registers + u64 immediate)
+</ParamField>
+
+### Bitwise (0x20-0x2F)
+
+<ParamField path="AND" type="0x20">
+  Bitwise AND (3 registers)
+</ParamField>
+
+<ParamField path="OR" type="0x21">
+  Bitwise OR (3 registers)
+</ParamField>
+
+<ParamField path="XOR" type="0x22">
+  Bitwise XOR (3 registers)
+</ParamField>
+
+<ParamField path="NOT" type="0x23">
+  Bitwise NOT (2 registers)
+</ParamField>
+
+<ParamField path="SHL" type="0x24">
+  Shift left (3 registers)
+</ParamField>
+
+<ParamField path="SHR" type="0x25">
+  Shift right (3 registers)
+</ParamField>
+
+### Comparison (0x30-0x3F)
+
+<ParamField path="EQ" type="0x30">
+  Equal (3 registers)
+</ParamField>
+
+<ParamField path="NE" type="0x31">
+  Not equal (3 registers)
+</ParamField>
+
+<ParamField path="LT" type="0x32">
+  Less than (3 registers)
+</ParamField>
+
+<ParamField path="GT" type="0x33">
+  Greater than (3 registers)
+</ParamField>
+
+<ParamField path="LE" type="0x34">
+  Less than or equal (3 registers)
+</ParamField>
+
+<ParamField path="GE" type="0x35">
+  Greater than or equal (3 registers)
+</ParamField>
+
+<ParamField path="ISZERO" type="0x36">
+  Is zero check (2 registers)
+</ParamField>
+
+### Memory (0x40-0x4F)
+
+<ParamField path="LOAD8" type="0x40">
+  Load 8-bit from memory (2 registers)
+</ParamField>
+
+<ParamField path="LOAD64" type="0x41">
+  Load 64-bit from memory (2 registers)
+</ParamField>
+
+<ParamField path="STORE8" type="0x42">
+  Store 8-bit to memory (2 registers)
+</ParamField>
+
+<ParamField path="STORE64" type="0x43">
+  Store 64-bit to memory (2 registers)
+</ParamField>
+
+<ParamField path="MSIZE" type="0x44">
+  Get memory size (1 register)
+</ParamField>
+
+<ParamField path="MCOPY" type="0x45">
+  Copy memory (3 registers)
+</ParamField>
+
+### Storage (0x50-0x5F)
+
+<ParamField path="SLOAD" type="0x50">
+  Load from storage (2 registers)
+</ParamField>
+
+<ParamField path="SSTORE" type="0x51">
+  Store to storage (2 registers)
+</ParamField>
+
+### Immediate (0x70-0x7F)
+
+<ParamField path="LOADI" type="0x70">
+  Load immediate (1 register + u64 immediate)
+</ParamField>
+
+<ParamField path="MOV" type="0x71">
+  Move between registers (2 registers)
+</ParamField>
+
+### Context (0x80-0x8F)
+
+<ParamField path="CALLER" type="0x80">
+  Get caller address (1 register)
+</ParamField>
+
+<ParamField path="CALLVALUE" type="0x81">
+  Get call value (1 register)
+</ParamField>
+
+<ParamField path="ADDRESS" type="0x82">
+  Get current address (1 register)
+</ParamField>
+
+<ParamField path="BLOCKNUMBER" type="0x83">
+  Get block number (1 register)
+</ParamField>
+
+<ParamField path="TIMESTAMP" type="0x84">
+  Get timestamp (1 register)
+</ParamField>
+
+<ParamField path="GAS" type="0x85">
+  Get remaining gas (1 register)
+</ParamField>
+
+### Debug (0xF0-0xFF)
+
+<ParamField path="LOG" type="0xF0">
+  Log value (1 register)
+</ParamField>
+
+## Register Encoding
+
+Registers are encoded in 4-bit nibbles (0-15 for R0-R15):
+
+- **Single register**: Stored in upper nibble, lower nibble is 0
+- **Two registers**: Packed as `(reg1 << 4) | reg2`
+- **Three registers**: First two packed in byte 1, third in upper nibble of byte 2
+
+### Examples
+
+```rust
+// Single register: JUMP R5
+// Bytecode: [0x02, 0x50]
+//           [JUMP, R5 << 4]
+
+// Two registers: MOV R0, R1
+// Bytecode: [0x71, 0x01]
+//           [MOV, (R0 << 4) | R1]
+
+// Three registers: ADD R2, R0, R1
+// Bytecode: [0x10, 0x20, 0x10]
+//           [ADD, (R2 << 4) | R0, R1 << 4]
+```
+
+## Immediate Values
+
+Immediate values are encoded as 64-bit little-endian integers:
+
+```rust
+// LOADI R0, 255
+// Bytecode: [0x70, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+//           [LOADI, R0, value as 8 bytes LE]
+```
+
+## Error Types
+
+### CompileError
+
+```rust
+pub enum CompileError {
+    UndefinedLabel(String),
+    DuplicateLabel { label: String, first_addr: u64 },
+    InvalidRegister(u8),
+}
+```
+
+<ParamField path="UndefinedLabel" type="Error">
+  Label referenced but never defined
+</ParamField>
+
+<ParamField path="DuplicateLabel" type="Error">
+  Label defined multiple times at different addresses
+</ParamField>
+
+<ParamField path="InvalidRegister" type="Error">
+  Register number outside valid range (0-15)
+</ParamField>
+
+## Usage Examples
+
+### Basic Compilation
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::Compiler;
+
+let source = r#"
+LOADI R0, 10
+HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+let bytecode = Compiler::compile(&program).unwrap();
+
+// LOADI R0, 10: [0x70, 0x00, 0x0A, 0x00, ...]
+// HALT: [0x00]
+assert_eq!(bytecode[0], 0x70);  // LOADI opcode
+assert_eq!(bytecode[1], 0x00);  // R0
+assert_eq!(bytecode[2], 10);    // immediate value
+assert_eq!(bytecode[10], 0x00); // HALT
+```
+
+### Label Resolution
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::Compiler;
+
+let source = r#"
+.entry main
+
+main:
+    LOADI R0, 10
+    LOADI R5, loop_end
+    JUMP R5
+
+loop_end:
+    HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+let bytecode = Compiler::compile(&program).unwrap();
+
+// Labels are resolved to addresses during compilation
+assert!(!bytecode.is_empty());
+```
+
+### Forward References
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::Compiler;
+
+let source = r#"
+LOADI R5, end      ; Forward reference
+JUMP R5
+ADD R0, R1, R2
+
+end:
+    HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+let bytecode = Compiler::compile(&program).unwrap();
+
+// Forward references work due to two-pass compilation
+assert!(!bytecode.is_empty());
+```
+
+### Constants
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::Compiler;
+
+let source = r#"
+.const MAX_VALUE 100
+
+LOADI R0, MAX_VALUE
+HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+let bytecode = Compiler::compile(&program).unwrap();
+
+// Constant is resolved to its value
+assert_eq!(bytecode[0], 0x70);  // LOADI
+assert_eq!(bytecode[1], 0x00);  // R0
+assert_eq!(bytecode[2], 100);   // MAX_VALUE
+```
+
+### Three-Register Instruction
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::Compiler;
+
+let source = "ADD R2, R0, R1";
+let program = Parser::parse(source).unwrap();
+let bytecode = Compiler::compile(&program).unwrap();
+
+// ADD R2, R0, R1
+// Byte 0: 0x10 (ADD opcode)
+// Byte 1: 0x20 (R2 in upper nibble, R0 in lower nibble)
+// Byte 2: 0x10 (R1 in upper nibble)
+assert_eq!(bytecode, vec![0x10, 0x20, 0x10]);
+```
+
+### Error Handling: Undefined Label
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::{Compiler, CompileError};
+
+let source = "LOADI R5, undefined_label";
+let program = Parser::parse(source).unwrap();
+let result = Compiler::compile(&program);
+
+match result {
+    Err(CompileError::UndefinedLabel(label)) => {
+        assert_eq!(label, "undefined_label");
+    }
+    _ => panic!("Expected undefined label error"),
+}
+```
+
+### Error Handling: Duplicate Label
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::{Compiler, CompileError};
+
+let source = r#"
+main:
+    HALT
+main:
+    HALT
+"#;
+
+let program = Parser::parse(source).unwrap();
+let result = Compiler::compile(&program);
+
+match result {
+    Err(CompileError::DuplicateLabel { label, first_addr }) => {
+        assert_eq!(label, "main");
+        assert_eq!(first_addr, 0);
+    }
+    _ => panic!("Expected duplicate label error"),
+}
+```
+
+### Complete Example
+
+```rust
+use minichain_assembler::parser::Parser;
+use minichain_assembler::compiler::Compiler;
+
+let source = r#"
+.entry main
+.const ITERATIONS 10
+
+main:
+    LOADI R0, 0              ; counter = 0
+    LOADI R1, ITERATIONS     ; max = 10
+    LOADI R5, loop_body      ; load loop address
+
+loop_body:
+    ADDI R0, R0, 1           ; counter++
+    LT R2, R0, R1            ; counter < max?
+    LOADI R5, loop_body      ; reload loop address
+    JUMPI R2, R5             ; jump if condition true
+    HALT                     ; exit
+"#;
+
+let program = Parser::parse(source).unwrap();
+let bytecode = Compiler::compile(&program).unwrap();
+
+println!("Compiled {} bytes", bytecode.len());
+println!("Bytecode: {:02X?}", bytecode);
+```
+
+## Compilation Pipeline
+
+### First Pass: Symbol Collection
+
+1. Iterate through all statements
+2. Track current bytecode address
+3. Record label addresses in symbol table
+4. Store constant values
+5. Validate no duplicate labels
+6. Calculate instruction sizes for address tracking
+
+### Second Pass: Bytecode Emission
+
+1. Iterate through all statements again
+2. Skip labels and directives (non-code)
+3. For each instruction:
+   - Emit opcode byte
+   - Encode register operands
+   - Resolve label references to addresses
+   - Emit immediate values in little-endian
+4. Return complete bytecode vector
+
+## Bytecode Format
+
+Each instruction follows a consistent format:
+
+```
+[Opcode] [Operands...]
+```
+
+- **1 byte**: Opcode
+- **0-2 bytes**: Register operands (packed in nibbles)
+- **0-8 bytes**: Immediate value (64-bit little-endian)
+
+### Size Examples
+
+- `HALT`: 1 byte total
+- `JUMP R5`: 2 bytes total
+- `MOV R0, R1`: 2 bytes total
+- `ADD R2, R0, R1`: 3 bytes total
+- `LOADI R0, 255`: 10 bytes total (1 opcode + 1 register + 8 immediate)
+- `ADDI R0, R1, 10`: 10 bytes total (1 opcode + 1 packed registers + 8 immediate)
+
+## Symbol Table
+
+The compiler maintains two tables:
+
+### Label Table
+
+Maps label names to bytecode addresses:
+
+```rust
+HashMap<String, u64>
+
+// Example:
+// "main" -> 0
+// "loop_body" -> 20
+// "end" -> 45
+```
+
+### Constant Table
+
+Maps constant names to values:
+
+```rust
+HashMap<String, u64>
+
+// Example:
+// "MAX_VALUE" -> 100
+// "ITERATIONS" -> 10
+```
+
+When resolving a `LoadILabel` instruction, the compiler checks both tables.
+
+## Related
+
+- [Lexer](/api/assembler/lexer) - Tokenize assembly source
+- [Parser](/api/assembler/parser) - Parse tokens into AST
+- [Virtual Machine](/api/vm/executor) - Execute compiled bytecode

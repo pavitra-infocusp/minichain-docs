@@ -1,0 +1,420 @@
+---
+title: "Lexer"
+description: "Tokenization for Minichain assembly language using fast lexical analysis"
+---
+
+## Overview
+
+The lexer module provides fast tokenization for assembly language source code using the `logos` crate. It converts assembly source text into a stream of tokens for parsing.
+
+## Token Types
+
+The lexer recognizes the following token categories:
+
+### Control Flow Instructions
+
+<ParamField path="HALT" type="Token">
+  Halts program execution
+</ParamField>
+
+<ParamField path="NOP" type="Token">
+  No operation (does nothing)
+</ParamField>
+
+<ParamField path="JUMP" type="Token">
+  Unconditional jump instruction
+</ParamField>
+
+<ParamField path="JUMPI" type="Token">
+  Conditional jump instruction
+</ParamField>
+
+<ParamField path="CALL" type="Token">
+  Call subroutine
+</ParamField>
+
+<ParamField path="RET" type="Token">
+  Return from subroutine
+</ParamField>
+
+<ParamField path="REVERT" type="Token">
+  Revert execution
+</ParamField>
+
+### Arithmetic Instructions
+
+<ParamField path="ADD" type="Token">
+  Addition operation
+</ParamField>
+
+<ParamField path="SUB" type="Token">
+  Subtraction operation
+</ParamField>
+
+<ParamField path="MUL" type="Token">
+  Multiplication operation
+</ParamField>
+
+<ParamField path="DIV" type="Token">
+  Division operation
+</ParamField>
+
+<ParamField path="MOD" type="Token">
+  Modulo operation
+</ParamField>
+
+<ParamField path="ADDI" type="Token">
+  Add immediate value
+</ParamField>
+
+### Bitwise Instructions
+
+<ParamField path="AND" type="Token">
+  Bitwise AND
+</ParamField>
+
+<ParamField path="OR" type="Token">
+  Bitwise OR
+</ParamField>
+
+<ParamField path="XOR" type="Token">
+  Bitwise XOR
+</ParamField>
+
+<ParamField path="NOT" type="Token">
+  Bitwise NOT
+</ParamField>
+
+<ParamField path="SHL" type="Token">
+  Shift left
+</ParamField>
+
+<ParamField path="SHR" type="Token">
+  Shift right
+</ParamField>
+
+### Comparison Instructions
+
+<ParamField path="EQ" type="Token">
+  Equal comparison
+</ParamField>
+
+<ParamField path="NE" type="Token">
+  Not equal comparison
+</ParamField>
+
+<ParamField path="LT" type="Token">
+  Less than comparison
+</ParamField>
+
+<ParamField path="GT" type="Token">
+  Greater than comparison
+</ParamField>
+
+<ParamField path="LE" type="Token">
+  Less than or equal comparison
+</ParamField>
+
+<ParamField path="GE" type="Token">
+  Greater than or equal comparison
+</ParamField>
+
+<ParamField path="ISZERO" type="Token">
+  Check if value is zero
+</ParamField>
+
+### Memory Instructions
+
+<ParamField path="LOAD8" type="Token">
+  Load 8-bit value from memory
+</ParamField>
+
+<ParamField path="LOAD64" type="Token">
+  Load 64-bit value from memory
+</ParamField>
+
+<ParamField path="STORE8" type="Token">
+  Store 8-bit value to memory
+</ParamField>
+
+<ParamField path="STORE64" type="Token">
+  Store 64-bit value to memory
+</ParamField>
+
+<ParamField path="MSIZE" type="Token">
+  Get memory size
+</ParamField>
+
+<ParamField path="MCOPY" type="Token">
+  Copy memory region
+</ParamField>
+
+### Storage Instructions
+
+<ParamField path="SLOAD" type="Token">
+  Load from persistent storage
+</ParamField>
+
+<ParamField path="SSTORE" type="Token">
+  Store to persistent storage
+</ParamField>
+
+### Immediate Instructions
+
+<ParamField path="LOADI" type="Token">
+  Load immediate value into register
+</ParamField>
+
+<ParamField path="MOV" type="Token">
+  Move value between registers
+</ParamField>
+
+### Context Instructions
+
+<ParamField path="CALLER" type="Token">
+  Get caller address
+</ParamField>
+
+<ParamField path="CALLVALUE" type="Token">
+  Get call value
+</ParamField>
+
+<ParamField path="ADDRESS" type="Token">
+  Get current contract address
+</ParamField>
+
+<ParamField path="BLOCKNUMBER" type="Token">
+  Get current block number
+</ParamField>
+
+<ParamField path="TIMESTAMP" type="Token">
+  Get block timestamp
+</ParamField>
+
+<ParamField path="GAS" type="Token">
+  Get remaining gas
+</ParamField>
+
+### Debug Instructions
+
+<ParamField path="LOG" type="Token">
+  Log value for debugging
+</ParamField>
+
+### Operands and Symbols
+
+<ParamField path="Register(u8)" type="Token">
+  Register reference (R0-R15)
+</ParamField>
+
+<ParamField path="Number(u64)" type="Token">
+  Decimal number literal
+</ParamField>
+
+<ParamField path="HexNumber(u64)" type="Token">
+  Hexadecimal number literal (0x prefix)
+</ParamField>
+
+<ParamField path="Identifier(String)" type="Token">
+  Label or constant name
+</ParamField>
+
+<ParamField path="Directive(String)" type="Token">
+  Assembler directive (starts with .)
+</ParamField>
+
+<ParamField path="Comma" type="Token">
+  Comma separator
+</ParamField>
+
+<ParamField path="Colon" type="Token">
+  Colon for label definitions
+</ParamField>
+
+## Lexer API
+
+### Lexer::new
+
+```rust
+pub fn new(source: &'source str) -> Self
+```
+
+Creates a new lexer for the given source code.
+
+<ParamField path="source" type="&str" required>
+  Assembly source code to tokenize
+</ParamField>
+
+<ResponseField name="Lexer" type="Lexer<'source>">
+  A new lexer instance ready to tokenize the source
+</ResponseField>
+
+### Lexer::span
+
+```rust
+pub fn span(&self) -> std::ops::Range<usize>
+```
+
+Returns the byte range span of the current token in the source.
+
+<ResponseField name="Range" type="Range<usize>">
+  Byte range of the current token
+</ResponseField>
+
+### Lexer::slice
+
+```rust
+pub fn slice(&self) -> &'source str
+```
+
+Returns the string slice of the current token.
+
+<ResponseField name="slice" type="&str">
+  String content of the current token
+</ResponseField>
+
+### Iterator Implementation
+
+The `Lexer` implements `Iterator` with items of type `(Token, usize)`, where the tuple contains the token and its line number.
+
+```rust
+fn next(&mut self) -> Option<(Token, usize)>
+```
+
+<ResponseField name="next" type="Option<(Token, usize)>">
+  Returns the next token and its line number, or `None` at end of input
+</ResponseField>
+
+## Features
+
+- **Case Insensitive**: All instruction mnemonics are case-insensitive (ADD, add, Add all work)
+- **Line Tracking**: Each token is tagged with its line number for error reporting
+- **Comment Support**: Line comments starting with `;` are automatically skipped
+- **Whitespace Handling**: Spaces, tabs, and newlines are automatically skipped
+- **Error Recovery**: Invalid characters are converted to error tokens
+
+## Usage Examples
+
+### Basic Tokenization
+
+```rust
+use minichain_assembler::lexer::Lexer;
+
+let source = "LOADI R0, 10";
+let tokens: Vec<_> = Lexer::new(source)
+    .map(|(token, _line)| token)
+    .collect();
+
+// tokens: [LoadI, Register(0), Comma, Number(10)]
+```
+
+### With Line Numbers
+
+```rust
+use minichain_assembler::lexer::Lexer;
+
+let source = r#"
+LOADI R0, 10
+ADD R1, R0, R0
+HALT
+"#;
+
+for (token, line) in Lexer::new(source) {
+    println!("Line {}: {:?}", line, token);
+}
+```
+
+### Handling Labels and Comments
+
+```rust
+use minichain_assembler::lexer::Lexer;
+
+let source = r#"
+main:           ; Entry point
+    LOADI R0, 10
+    HALT
+"#;
+
+let tokens: Vec<_> = Lexer::new(source)
+    .map(|(token, _)| token)
+    .collect();
+
+// Comments are automatically stripped
+// tokens: [Identifier("main"), Colon, LoadI, Register(0), Comma, Number(10), Halt]
+```
+
+### Hexadecimal Numbers
+
+```rust
+use minichain_assembler::lexer::Lexer;
+
+let source = "LOADI R0, 0xFF";
+let tokens: Vec<_> = Lexer::new(source)
+    .map(|(token, _)| token)
+    .collect();
+
+// tokens: [LoadI, Register(0), Comma, HexNumber(255)]
+```
+
+### Register Range
+
+```rust
+use minichain_assembler::lexer::Lexer;
+
+let source = "R0 R15 R16";
+let tokens: Vec<_> = Lexer::new(source)
+    .map(|(token, _)| token)
+    .collect();
+
+// R0-R15 are valid registers
+// R16 is out of range and becomes an Identifier
+// tokens: [Register(0), Register(15), Identifier("R16")]
+```
+
+### Directives
+
+```rust
+use minichain_assembler::lexer::Lexer;
+
+let source = ".entry main";
+let tokens: Vec<_> = Lexer::new(source)
+    .map(|(token, _)| token)
+    .collect();
+
+// tokens: [Directive("entry"), Identifier("main")]
+```
+
+## Token Patterns
+
+<ParamField path="Instructions" type="Pattern">
+  Case-insensitive keywords (HALT, NOP, ADD, etc.)
+</ParamField>
+
+<ParamField path="Registers" type="Pattern">
+  `[Rr][0-9]` or `[Rr]1[0-5]` (R0-R15)
+</ParamField>
+
+<ParamField path="Decimal Numbers" type="Pattern">
+  `[0-9]+`
+</ParamField>
+
+<ParamField path="Hex Numbers" type="Pattern">
+  `0x[0-9a-fA-F]+`
+</ParamField>
+
+<ParamField path="Identifiers" type="Pattern">
+  `[a-zA-Z_][a-zA-Z0-9_]*`
+</ParamField>
+
+<ParamField path="Directives" type="Pattern">
+  `\.[a-z]+`
+</ParamField>
+
+<ParamField path="Comments" type="Pattern">
+  `;[^\n]*` (skipped automatically)
+</ParamField>
+
+## Related
+
+- [Parser](/api/assembler/parser) - Parse tokens into AST
+- [Compiler](/api/assembler/compiler) - Compile AST to bytecode

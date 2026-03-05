@@ -1,0 +1,544 @@
+---
+title: Transaction
+description: Transaction types and signing for the blockchain
+---
+
+The `transaction` module provides the `Transaction` type and related functionality for creating, signing, and verifying blockchain transactions.
+
+## Overview
+
+Transactions are the primary way users interact with the blockchain. They can transfer value, deploy contracts, or call contract functions.
+
+## Types
+
+### Transaction
+
+```rust
+pub struct Transaction {
+    pub nonce: u64,
+    pub from: Address,
+    pub to: Option<Address>,
+    pub value: u64,
+    pub data: Vec<u8>,
+    pub gas_limit: u64,
+    pub gas_price: u64,
+    pub signature: Signature,
+}
+```
+
+Represents a transaction on the blockchain.
+
+<ParamField path="nonce" type="u64">
+  Sender's nonce (sequence number). Must match the account's current nonce.
+</ParamField>
+
+<ParamField path="from" type="Address">
+  Sender's address.
+</ParamField>
+
+<ParamField path="to" type="Option<Address>">
+  Recipient's address. `None` for contract deployment transactions.
+</ParamField>
+
+<ParamField path="value" type="u64">
+  Amount to transfer to the recipient.
+</ParamField>
+
+<ParamField path="data" type="Vec<u8>">
+  Transaction data. Can be:
+  - Empty for simple value transfers
+  - Contract bytecode for deployments
+  - Calldata for contract calls
+</ParamField>
+
+<ParamField path="gas_limit" type="u64">
+  Maximum gas to use for this transaction.
+</ParamField>
+
+<ParamField path="gas_price" type="u64">
+  Price per unit of gas (in smallest token unit).
+</ParamField>
+
+<ParamField path="signature" type="Signature">
+  Ed25519 signature over the transaction data.
+</ParamField>
+
+#### Constructors
+
+<ResponseField name="new" type="fn(nonce: u64, from: Address, to: Option<Address>, value: u64, data: Vec<u8>, gas_limit: u64, gas_price: u64) -> Self">
+  Creates a new unsigned transaction.
+  
+  ```rust
+  use minichain_core::Transaction;
+  use minichain_core::crypto::Address;
+  
+  let tx = Transaction::new(
+      0,                              // nonce
+      sender_address,                 // from
+      Some(recipient_address),        // to
+      1000,                           // value
+      vec![],                         // data
+      21_000,                         // gas_limit
+      1,                              // gas_price
+  );
+  ```
+</ResponseField>
+
+<ResponseField name="transfer" type="fn(from: Address, to: Address, value: u64, nonce: u64, gas_price: u64) -> Self">
+  Creates a value transfer transaction.
+  
+  Automatically sets gas_limit to 21,000 (the base cost for transfers).
+  
+  ```rust
+  use minichain_core::Transaction;
+  
+  let tx = Transaction::transfer(
+      sender_address,
+      recipient_address,
+      1000,    // value
+      0,       // nonce
+      1,       // gas_price
+  );
+  
+  assert!(tx.is_transfer());
+  assert_eq!(tx.gas_limit, 21_000);
+  ```
+</ResponseField>
+
+<ResponseField name="deploy" type="fn(from: Address, bytecode: Vec<u8>, nonce: u64, gas_limit: u64, gas_price: u64) -> Self">
+  Creates a contract deployment transaction.
+  
+  ```rust
+  use minichain_core::Transaction;
+  
+  let bytecode = vec![0x60, 0x80, 0x60, 0x40];
+  let tx = Transaction::deploy(
+      deployer_address,
+      bytecode,
+      0,        // nonce
+      100_000,  // gas_limit
+      1,        // gas_price
+  );
+  
+  assert!(tx.is_deploy());
+  assert!(tx.to.is_none());
+  ```
+</ResponseField>
+
+<ResponseField name="call" type="fn(from: Address, to: Address, data: Vec<u8>, value: u64, nonce: u64, gas_limit: u64, gas_price: u64) -> Self">
+  Creates a contract call transaction.
+  
+  ```rust
+  use minichain_core::Transaction;
+  
+  let calldata = vec![0x12, 0x34, 0x56, 0x78];
+  let tx = Transaction::call(
+      caller_address,
+      contract_address,
+      calldata,
+      0,       // value
+      0,       // nonce
+      50_000,  // gas_limit
+      1,       // gas_price
+  );
+  
+  assert!(tx.is_call());
+  ```
+</ResponseField>
+
+#### Methods
+
+<ResponseField name="signing_hash" type="fn(&self) -> Hash">
+  Computes the hash of the unsigned transaction data (for signing).
+  
+  This hash includes all transaction fields except the signature.
+  
+  ```rust
+  let tx = Transaction::transfer(from, to, 100, 0, 1);
+  let hash = tx.signing_hash();
+  ```
+</ResponseField>
+
+<ResponseField name="hash" type="fn(&self) -> Hash">
+  Computes the hash of the full transaction (including signature).
+  
+  This is the transaction ID used for lookups.
+  
+  ```rust
+  let tx = Transaction::transfer(from, to, 100, 0, 1).signed(&keypair);
+  let tx_id = tx.hash();
+  println!("Transaction ID: {}", tx_id.to_hex());
+  ```
+</ResponseField>
+
+<ResponseField name="sign" type="fn(&mut self, keypair: &Keypair)">
+  Signs the transaction with the given keypair (mutates in place).
+  
+  ```rust
+  let mut tx = Transaction::transfer(from, to, 100, 0, 1);
+  tx.sign(&keypair);
+  ```
+</ResponseField>
+
+<ResponseField name="signed" type="fn(self, keypair: &Keypair) -> Self">
+  Signs the transaction and returns it (builder pattern).
+  
+  ```rust
+  let tx = Transaction::transfer(from, to, 100, 0, 1)
+      .signed(&keypair);
+  ```
+</ResponseField>
+
+<ResponseField name="verify" type="fn(&self, public_key: &PublicKey) -> Result<(), TransactionError>">
+  Verifies the transaction signature against a public key.
+  
+  ```rust
+  let tx = Transaction::transfer(from, to, 100, 0, 1).signed(&keypair);
+  tx.verify(&keypair.public_key)?;
+  ```
+</ResponseField>
+
+<ResponseField name="is_deploy" type="fn(&self) -> bool">
+  Checks if this is a contract deployment transaction.
+  
+  ```rust
+  let tx = Transaction::deploy(from, bytecode, 0, 100_000, 1);
+  assert!(tx.is_deploy());
+  ```
+</ResponseField>
+
+<ResponseField name="is_transfer" type="fn(&self) -> bool">
+  Checks if this is a simple value transfer (no data).
+  
+  ```rust
+  let tx = Transaction::transfer(from, to, 100, 0, 1);
+  assert!(tx.is_transfer());
+  ```
+</ResponseField>
+
+<ResponseField name="is_call" type="fn(&self) -> bool">
+  Checks if this is a contract call (has recipient and data).
+  
+  ```rust
+  let tx = Transaction::call(from, to, calldata, 0, 0, 50_000, 1);
+  assert!(tx.is_call());
+  ```
+</ResponseField>
+
+<ResponseField name="max_cost" type="fn(&self) -> u64">
+  Calculates the maximum cost of this transaction (value + gas).
+  
+  ```rust
+  let tx = Transaction::new(0, from, Some(to), 1000, vec![], 21_000, 2);
+  assert_eq!(tx.max_cost(), 1000 + 21_000 * 2);
+  ```
+</ResponseField>
+
+<ResponseField name="contract_address" type="fn(&self) -> Option<Address>">
+  Calculates the contract address for a deployment transaction.
+  
+  Returns `None` if this is not a deployment transaction.
+  
+  The address is derived from hash(sender || nonce).
+  
+  ```rust
+  let tx = Transaction::deploy(from, bytecode, 0, 100_000, 1);
+  let contract_addr = tx.contract_address().unwrap();
+  println!("Contract will be deployed at: {}", contract_addr.to_hex());
+  ```
+</ResponseField>
+
+#### Trait Implementations
+
+- **Debug, Clone, PartialEq, Eq**: Standard derivations
+- **Serialize, Deserialize**: Serde support
+
+## Errors
+
+### TransactionError
+
+```rust
+pub enum TransactionError {
+    InvalidSignature,
+    VerificationFailed,
+    MissingSignature,
+}
+```
+
+<ParamField path="InvalidSignature" type="variant">
+  The signature format is invalid
+</ParamField>
+
+<ParamField path="VerificationFailed" type="variant">
+  Signature verification failed (signature doesn't match transaction/key)
+</ParamField>
+
+<ParamField path="MissingSignature" type="variant">
+  Transaction has no signature
+</ParamField>
+
+## Usage Examples
+
+### Simple Value Transfer
+
+```rust
+use minichain_core::{Transaction, crypto::Keypair};
+
+// Create keypairs
+let alice = Keypair::generate();
+let bob_address = Keypair::generate().address();
+
+// Create and sign a transfer transaction
+let tx = Transaction::transfer(
+    alice.address(),
+    bob_address,
+    1000,  // transfer 1000 tokens
+    0,     // nonce
+    1,     // gas price
+).signed(&alice);
+
+// Verify signature
+assert!(tx.verify(&alice.public_key).is_ok());
+
+// Check transaction details
+assert!(tx.is_transfer());
+assert_eq!(tx.value, 1000);
+assert_eq!(tx.gas_limit, 21_000);
+```
+
+### Contract Deployment
+
+```rust
+use minichain_core::{Transaction, crypto::Keypair};
+
+// Compile contract bytecode (simplified)
+let bytecode = vec![
+    0x60, 0x80, 0x60, 0x40, // Push instructions
+    // ... more bytecode
+];
+
+// Create deployer
+let deployer = Keypair::generate();
+
+// Create deployment transaction
+let tx = Transaction::deploy(
+    deployer.address(),
+    bytecode,
+    0,        // nonce
+    100_000,  // gas limit
+    1,        // gas price
+).signed(&deployer);
+
+// Get the contract address (deterministic)
+let contract_address = tx.contract_address().unwrap();
+println!("Contract address: {}", contract_address.to_hex());
+```
+
+### Contract Call
+
+```rust
+use minichain_core::{Transaction, crypto::Keypair};
+use minichain_core::crypto::Address;
+
+// Create caller
+let caller = Keypair::generate();
+
+// Contract address (from previous deployment)
+let contract_address = Address::from_hex("0x1234...").unwrap();
+
+// Prepare calldata (function selector + arguments)
+let calldata = vec![0x12, 0x34, 0x56, 0x78];
+
+// Create call transaction
+let tx = Transaction::call(
+    caller.address(),
+    contract_address,
+    calldata,
+    0,       // value (can send tokens with call)
+    0,       // nonce
+    50_000,  // gas limit
+    1,       // gas price
+).signed(&caller);
+
+assert!(tx.is_call());
+```
+
+### Transaction Verification
+
+```rust
+use minichain_core::{Transaction, crypto::Keypair};
+
+let keypair = Keypair::generate();
+let to_address = Keypair::generate().address();
+
+// Create and sign transaction
+let tx = Transaction::transfer(
+    keypair.address(),
+    to_address,
+    100,
+    0,
+    1,
+).signed(&keypair);
+
+// Verify with correct key
+match tx.verify(&keypair.public_key) {
+    Ok(()) => println!("Signature valid"),
+    Err(e) => println!("Signature invalid: {}", e),
+}
+
+// Verify with wrong key fails
+let other_keypair = Keypair::generate();
+assert!(tx.verify(&other_keypair.public_key).is_err());
+```
+
+### Checking Transaction Cost
+
+```rust
+use minichain_core::{Transaction, Account};
+
+let mut account = Account::new_user(50_000);
+
+let tx = Transaction::transfer(
+    account_address,
+    recipient,
+    1000,
+    0,
+    2,  // gas price
+);
+
+// Check if account has enough balance
+let max_cost = tx.max_cost();
+if account.has_balance(max_cost) {
+    // Debit account
+    account.debit(max_cost);
+    println!("Transaction can be processed");
+} else {
+    println!("Insufficient balance");
+}
+```
+
+### Transaction Hashing
+
+```rust
+use minichain_core::Transaction;
+
+let tx = Transaction::transfer(from, to, 100, 0, 1).signed(&keypair);
+
+// Get signing hash (without signature)
+let signing_hash = tx.signing_hash();
+
+// Get full transaction hash (with signature)
+let tx_hash = tx.hash();
+
+println!("Transaction ID: {}", tx_hash.to_hex());
+```
+
+### Contract Address Calculation
+
+```rust
+use minichain_core::Transaction;
+
+let deployer = Keypair::generate();
+
+// First contract deployment (nonce = 0)
+let tx1 = Transaction::deploy(
+    deployer.address(),
+    vec![0x01, 0x02],
+    0,
+    100_000,
+    1,
+);
+let addr1 = tx1.contract_address().unwrap();
+
+// Second contract deployment (nonce = 1)
+let tx2 = Transaction::deploy(
+    deployer.address(),
+    vec![0x03, 0x04],
+    1,
+    100_000,
+    1,
+);
+let addr2 = tx2.contract_address().unwrap();
+
+// Different nonces produce different addresses
+assert_ne!(addr1, addr2);
+```
+
+### Transaction Type Detection
+
+```rust
+use minichain_core::Transaction;
+
+fn process_transaction(tx: &Transaction) {
+    if tx.is_transfer() {
+        println!("Processing value transfer: {} tokens", tx.value);
+    } else if tx.is_deploy() {
+        println!("Processing contract deployment: {} bytes", tx.data.len());
+        if let Some(addr) = tx.contract_address() {
+            println!("  Contract address: {}", addr.to_hex());
+        }
+    } else if tx.is_call() {
+        println!("Processing contract call: {} bytes of data", tx.data.len());
+    }
+}
+```
+
+## Implementation Details
+
+### Transaction Types
+
+Three types of transactions are distinguished by the `to` field and `data`:
+
+| Type | `to` | `data` | Purpose |
+|------|------|--------|----------|
+| Transfer | `Some(address)` | Empty | Send tokens |
+| Deploy | `None` | Bytecode | Deploy contract |
+| Call | `Some(address)` | Calldata | Call contract |
+
+### Signing Process
+
+1. Serialize unsigned transaction fields (excluding signature)
+2. Hash the serialized data with Blake3
+3. Sign the hash with Ed25519
+4. Store signature in transaction
+
+```rust
+pub fn sign(&mut self, keypair: &Keypair) {
+    let hash = self.signing_hash();
+    self.signature = keypair.sign_hash(&hash);
+}
+```
+
+### Contract Address Derivation
+
+Contract addresses are deterministically derived from:
+
+```rust
+address = first_20_bytes(hash(sender_address || nonce))
+```
+
+This ensures:
+- Contracts have unique addresses
+- Address can be calculated before deployment
+- Same deployer + nonce always produces same address
+
+### Gas Cost Calculation
+
+```rust
+max_cost = value + (gas_limit * gas_price)
+```
+
+The sender must have at least `max_cost` balance to submit the transaction.
+
+### Nonce Ordering
+
+Transactions must be processed in nonce order:
+- First transaction: nonce = 0
+- Second transaction: nonce = 1
+- Etc.
+
+This prevents replay attacks and ensures deterministic execution order.
+
+## Source Location
+
+Defined in `crates/core/src/transaction.rs`
